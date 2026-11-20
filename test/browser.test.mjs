@@ -1,3 +1,4 @@
+import {spawn} from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {EventEmitter} from "node:events";
@@ -31,4 +32,11 @@ test("AI Studio independent codec preserves binding, signatures, sparse arrays a
 test("Studio schema adapts local refs, nullable unions and empty enum members without fetching or weakening tool validation",()=>{
  const source={type:"object",properties:{sort:{$ref:"#/$defs/Sort"},value:{type:["string","null"]}},$defs:{Sort:{type:"string",enum:["","asc"]}}};
  const wire=schema(source);const sort=wire[6].find(([name])=>name==="sort")[1];assert.ok(sort[17]);assert.equal(wire[6].find(([name])=>name==="value")[1][3],true);assert.throws(()=>schema({$ref:"https://external.invalid/schema"}),{code:"invalid_studio_request"});
+});
+
+
+test("cold browser preparation invokes the installed Playwright CLI without relying on an unexported subpath",async()=>{
+ const dir=await mkdtemp(join(tmpdir(),"ai-bridge-browser-installer-"));let started=false;
+ const browser=new GoogleBrowser({dataDir:dir,spawnProcess:(command,args,options)=>{started=true;assert.match(args[0],/[\\/]playwright-core[\\/]cli\.js$/);assert.deepEqual(args.slice(1),["install","chromium","--no-shell"]);assert.equal(options.env.ADMIN_PASSWORD,undefined);return spawn(command,[args[0],"--version"],options);}});
+ try{await browser.prepare();assert.equal(started,true);assert.equal(browser.installChild,null);assert.equal(browser.status().state,"idle");}finally{await browser.close();await rm(dir,{recursive:true,force:true});}
 });

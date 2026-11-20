@@ -5,7 +5,7 @@ import {spawn} from "node:child_process";
 import {AppError} from "../common.mjs";
 const require=createRequire(import.meta.url);
 export class GoogleBrowser {
- constructor({dataDir,idleMs=120000,launch,logger}={}){Object.assign(this,{root:join(dataDir,"google"),idleMs,launch,logger});this.context=null;this.profile=null;this.users=0;this.starting=null;this.installing=null;this.timer=null;this.closed=false;this.phase="idle";}
+ constructor({dataDir,idleMs=120000,launch,logger,spawnProcess=spawn}={}){Object.assign(this,{spawnProcess,root:join(dataDir,"google"),idleMs,launch,logger});this.context=null;this.profile=null;this.users=0;this.starting=null;this.installing=null;this.timer=null;this.closed=false;this.phase="idle";}
  status(){return{state:this.phase,active_requests:this.users,browser_running:!!this.context};}
  async executable(){
   if(process.env.BROWSER_EXECUTABLE)return resolve(process.env.BROWSER_EXECUTABLE);
@@ -18,7 +18,7 @@ export class GoogleBrowser {
   if(this.installing)return this.installing;
   this.phase="preparing";
   this.installing=(async()=>{await mkdir(join(this.root,"browser-cache"),{recursive:true,mode:0o700});await new Promise((resolve,reject)=>{
-   const child=spawn(process.execPath,[require.resolve("playwright-core/cli"),"install","chromium","--no-shell"],{env:{...safeEnvironment(),PLAYWRIGHT_BROWSERS_PATH:join(this.root,"browser-cache")},stdio:"ignore",windowsHide:true,shell:false});
+   const child=this.spawnProcess(process.execPath,[join(dirname(require.resolve("playwright-core/package.json")),"cli.js"),"install","chromium","--no-shell"],{env:{...safeEnvironment(),PLAYWRIGHT_BROWSERS_PATH:join(this.root,"browser-cache")},stdio:"ignore",windowsHide:true,shell:false});
    this.installChild=child;const timer=setTimeout(()=>child.kill(),10*60000);child.once("error",()=>{clearTimeout(timer);reject(new AppError(503,"浏览器下载无法启动","browser_prepare_failed"));});child.once("close",code=>{this.installChild=null;clearTimeout(timer);if(code===0)resolve();else reject(new AppError(503,"浏览器准备失败，请检查网络与磁盘空间","browser_prepare_failed"));});
   });})().finally(()=>{this.installing=null;this.phase=this.context?"ready":"idle";});return this.installing;
  }
