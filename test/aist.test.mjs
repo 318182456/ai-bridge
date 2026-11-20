@@ -42,3 +42,16 @@ test("AI Studio uses the project browser engine without an upstream executable",
  let calls=0;const engine={async *run(op){calls++;if(op==="models")yield{result:{models:[{id:"gemini-test"}]}};},close:async()=>{}};
  const b=new AIStudio({engine});try{const result=await b.open("/v1/models");assert.equal((await result.response.json()).data[0].id,"gemini-test");assert.equal(calls,1);assert.equal(b.status().resident_processes,0);await assert.rejects(b.open("https://external.invalid"),{status:400});}finally{await b.close();}
 });
+
+test("AI Studio SSE flushes a waiting comment while the generation is still queued",async()=>{
+ const dir=await mkdtemp(join(tmpdir(),"ai-bridge-queued-stream-"));let unblock,called=false;
+ const backend={status:()=>({state:"ready"}),close:async()=>{},open:async()=>{called=true;return{response:new Response('data: {"choices":[],"usage":{"total_tokens":2}}\n\ndata: [DONE]\n\n'),release(){}};}};
+ const app=await createApplication({dataDir:dir,password,key,aistudio:backend,logger:new Logger({sink:()=>{}}),runner:new Runner({dataDir:dir,command:process.execPath,prefix:[resolve("test/fixtures/fake-cli.mjs")]})});
+ await new Promise(r=>app.server.listen(0,"127.0.0.1",r));const origin="http://127.0.0.1:"+app.server.address().port;
+ const occupied=app.queue.add(()=>new Promise(resolve=>{unblock=resolve;}));
+ try{
+  const response=await fetch(origin+"/aist/v1/chat/completions",{method:"POST",headers:{authorization:"Bearer "+key,"content-type":"application/json"},body:JSON.stringify({model:"synthetic-model",stream:true,messages:[{role:"user",content:"synthetic"}]}),signal:AbortSignal.timeout(5000)});
+  const reader=response.body.getReader(),first=await reader.read();assert.match(new TextDecoder().decode(first.value),/^: waiting/);assert.equal(called,false);assert.equal(response.headers.get("x-stream-mode"),"buffered");
+  unblock();await occupied;let final="";for(;;){const next=await reader.read();if(next.done)break;final+=new TextDecoder().decode(next.value);}assert.match(final,/\[DONE\]/);assert.equal(called,true);assert.equal(app.store.state.backend_usage.aist.successes,1);
+ }finally{unblock?.();await occupied;app.tasks.close();await app.backends.close();app.loginManager.close();await app.runner.close();app.server.closeAllConnections();await new Promise(r=>app.server.close(r));await app.store.pending;await rm(dir,{recursive:true,force:true});}
+});

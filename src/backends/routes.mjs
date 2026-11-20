@@ -28,13 +28,20 @@ export function registerAIStudio({register,body,send,backends,queue,store,logger
     if(input.stream!=null&&typeof input.stream!=="boolean")throw new AppError(400,"stream 必须为布尔值");
     const {backend:selector,...payload}=input;
     context.stage="queue";
-    return queue.add(async jobSignal=>{
+    let heartbeat;
+    if(input.stream){
+      res.writeHead(200,{"content-type":"text/event-stream; charset=utf-8","cache-control":"no-cache, no-transform","x-accel-buffering":"no","x-ai-bridge-backend":id,"x-stream-mode":"buffered"});
+      res.write(": waiting\n\n");
+      heartbeat=setInterval(()=>{if(!res.destroyed&&!res.writableEnded&&res.writableLength<65536)res.write(": waiting\n\n");},15000);heartbeat.unref?.();
+    }
+    try{return await queue.add(async jobSignal=>{
       store.assertKeyActive(principal.key_id);context.stage="generation";
       const {response,release}=await backend.open("/v1/chat/completions",{signal:jobSignal,method:"POST",json:payload});
       let completed=false;const usage=new UsageInspector(input.stream===true);
       try{
         // Only protocol headers pass through. Never expose backend cookies or credentials.
-        res.writeHead(response.status,{"content-type":input.stream?"text/event-stream; charset=utf-8":"application/json; charset=utf-8","x-accel-buffering":"no","x-ai-bridge-backend":id,...(response.headers.get("x-stream-mode")?{"x-stream-mode":response.headers.get("x-stream-mode")}:{})});
+        if(input.stream&&!response.ok)throw new AppError(response.status,label+" 拒绝生成请求","backend_request_failed");
+        if(!res.headersSent)res.writeHead(response.status,{"content-type":input.stream?"text/event-stream; charset=utf-8":"application/json; charset=utf-8","x-accel-buffering":"no","x-ai-bridge-backend":id,...(response.headers.get("x-stream-mode")?{"x-stream-mode":response.headers.get("x-stream-mode")}:{})});
         for await(const bytes of response.body){if(jobSignal.aborted)throw new AppError(499,"请求已取消","cancelled");usage.push(bytes);if(!res.write(bytes))await once(res,"drain",{signal:jobSignal});}
         usage.finish();completed=response.ok&&!usage.error;res.end();
       }finally{
@@ -44,7 +51,7 @@ export function registerAIStudio({register,body,send,backends,queue,store,logger
         await store.event({id:requestId,api_key_id:principal.key_id,api_key_name:principal.key_name,account_id:usage.accountId||null,account_name:label+"（内置后端）",model:input.model,status:completed?response.status:response.ok?502:response.status,stage:completed?"completed":"generation",total_tokens:completed?usage.total:null,duration_ms:Date.now()-started});context.recorded=true;
         logger[completed?"info":"warn"](completed?"request.completed":"request.failed",{request_id:requestId,stage:id,status:completed?200:response.ok?502:response.status,duration_ms:Date.now()-started});
       }
-    },signal,{id:requestId,cancelable:true,metadata:{kind:"generation",source:"api",account_name:label,model:input.model,api_key_name:principal.key_name,summary:label+" 模型调用",content:JSON.stringify(payload.messages)}});
+    },signal,{id:requestId,resource:"backend:"+id,cancelable:true,metadata:{resource_name:id==="aist"?"AI Studio 浏览器":"Robin 当前请求",kind:"generation",source:"api",account_name:label,model:input.model,api_key_name:principal.key_name,summary:label+" 模型调用",content:JSON.stringify(payload.messages)}});}finally{clearInterval(heartbeat);}
   }
   register("POST","/"+id+"/v1/chat/completions","api",async ctx=>chat(ctx,await body(ctx.req)));
   return chat;

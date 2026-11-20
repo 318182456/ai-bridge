@@ -37,3 +37,12 @@ test("background result capacity evicts an older completed result only when admi
  assert.equal(tasks.entries.size,128);assert.throws(()=>tasks.view("0","owner"),{code:"task_not_found"});assert.equal(tasks.view("next","owner").result.content,"next");
  }finally{tasks.close();}
 });
+
+test("shared backend resources wait visibly without blocking another backend or claiming an account",async()=>{
+ const queue=new SerialQueue(8,2);let releaseA,startedB=false;
+ const a=queue.add(()=>new Promise(resolve=>{releaseA=resolve;}),undefined,{id:"a",resource:"browser",metadata:{resource_name:"AI Studio 浏览器"}});
+ const b=queue.add(async()=>{startedB=true;},undefined,{id:"b",resource:"browser",metadata:{resource_name:"AI Studio 浏览器"}});
+ const other=queue.add(async()=>42,undefined,{id:"other",resource:"robin"});
+ assert.equal(await other,42);assert.equal(startedB,false);assert.equal(queue.get("b").reason,"等待AI Studio 浏览器");assert.equal(queue.get("b").account_id,null);
+ releaseA();await a;await b;assert.equal(startedB,true);assert.equal(queue.activeResources.size,0);assert.equal(queue.running,0);
+});
