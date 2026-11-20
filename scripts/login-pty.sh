@@ -1,3 +1,3 @@
 #!/bin/sh
 stty cols 180 rows 60
-exec agy
+exec "${AGY_BIN:-agy}"

@@ -24,10 +24,10 @@ export class Quotas {
     const account=this.store.get(id);
     if(this.pending.has(id))return this.pending.get(id);
     if(!force&&!this.view(id).stale)return Promise.resolve(this.view(id));
-    const work=this.queue.add(async()=>{
+    const work=this.queue.add(async(signal)=>{
       const started=Date.now();this.logger?.info("quota.started",{account_id:id});
       try{
-        const result=await this.runner.execute(id,{quota:true});
+        const result=await this.runner.execute(id,{quota:true,signal});
         account.quota=result.quota;account.quota_error=null;
         await this.store.save();
         this.logger?.info("quota.completed",{account_id:id,count:account.quota.groups.length,duration_ms:Date.now()-started});
@@ -36,7 +36,7 @@ export class Quotas {
         await this.store.save();
         this.logger?.warn("quota.failed",{account_id:id,code:error.code||"quota_failed",duration_ms:Date.now()-started});
       }
-    },undefined,{key:id});
+    },undefined,{key:id,cancelable:true,metadata:{kind:"quota",account_name:account.name,summary:"查询账号额度"}});
     this.pending.set(id,work);
     const result=work.catch(error=>{account.quota_error={code:error.code||"quota_failed",message:error.message,at:new Date().toISOString()};})
       .finally(()=>this.pending.delete(id)).then(()=>this.view(id));

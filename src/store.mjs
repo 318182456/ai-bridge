@@ -7,14 +7,14 @@ export class Store {
   constructor(dir) {
     this.dir = dir;
     this.path = join(dir, "state.json");
-    this.state = { accounts: [], cursor: 0, events: [], keys: [], settings: {...defaultSettings}, master_usage: freshUsage() };
+    this.state = { accounts: [], cursor: 0, events: [], keys: [], settings: {...defaultSettings}, backend_usage:{aist:freshUsage(),robin:freshUsage()}, master_usage: freshUsage() };
     this.pending = Promise.resolve();
   }
   async init() {
     await mkdir(this.dir, { recursive: true, mode: 0o700 });
     try {
       const loaded = JSON.parse(await readFile(this.path, "utf8"));
-      this.state = {...this.state,...loaded,settings:{...defaultSettings,...loaded.settings}};
+      this.state = {...this.state,...loaded,backend_usage:{...this.state.backend_usage,...loaded.backend_usage},settings:{...defaultSettings,...loaded.settings}};
     } catch (e) {
       if (e.code !== "ENOENT") throw e;
     }
@@ -182,6 +182,8 @@ export class Store {
     if(!key||!key.enabled||(key.expires_at&&Date.parse(key.expires_at)<=Date.now()))throw new AppError(401,"API 密钥已停用、删除或到期","invalid_api_key");
   }
   keyUsage(id) { return id==="master"?this.state.master_usage:this.state.keys.find(k=>k.id===id)?.usage; }
+  beginBackendRequest(id){const u=this.state.backend_usage[id];if(u){u.requests++;u.last_used=new Date().toISOString();}}
+  endBackendRequest(id,success,tokens=null){const u=this.state.backend_usage[id];if(!u)return;u[success?"successes":"failures"]++;if(Number.isFinite(tokens)){u.total_tokens+=tokens;u.token_reports++;}}
   beginKeyRequest(id) {const usage=this.keyUsage(id);if(usage){usage.requests++;usage.last_used=new Date().toISOString();}}
   endKeyRequest(id,success,tokens=null) {
     const usage=this.keyUsage(id);if(!usage)return;

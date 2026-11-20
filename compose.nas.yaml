@@ -1,8 +1,8 @@
 # NAS：沿用 Dockhand 的共享 SSO 入口与代理。
-name: agy-docker
+name: ai-bridge
 services:
   app:
-    image: ghcr.io/318182456/agy-docker:${IMAGE_TAG:-0.3.0}
+    image: ghcr.io/318182456/ai-bridge:${IMAGE_TAG:-0.4.0-alpha.1}
     extends:
       file: ../all/compose-presets.yml
       service: web-sso-bridge-model-api

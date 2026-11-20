@@ -1,8 +1,8 @@
 # 项目约定
 
-- 这是独立的 agy-docker 项目，与 agy2api-workers 的数据库、账号和部署无关。
+- 当前仓库由 agy-docker 演进为 ai-bridge，与 agy2api-workers 的数据库、账号和部署无关。用户已确认同一项目内置 agy、Robin、AI Studio，不按 Git 分支分别部署。
 - `npm test` 为本机核心测试；生产环境使用版本化GHCR镜像，NAS用 `docker compose -f compose.nas.yaml up -d`；源码构建仅用于开发。
-- 只通过原版 `agy` 子进程执行任务，不加入Google内部生成API或OAuth Token提取逻辑。
+- agy 后端仅使用原版 `agy` 子进程，不提取其 OAuth Token。AI Studio 与 Robin 均以本项目 Node.js 代码独立实现，仅参考上游协议，不打包上游服务、Go 或 C++ 模块；不得把未完成的后端或授权状态标记为已就绪。三个后端共享全局调度，按需启动和空闲回收；原生 Linux 安装与 Docker 使用同一代码与持久化结构。
 - 正常请求轮询，全局并发由MAX_CONCURRENCY配置（1–16），同账号串行，登录排他；失败不自动换账号重放；停用/登录失效需明确处理。
 - 默认请求独立；仅显式session_id复用会话，绑定创建者、账号、模型与工具配置。续接校验完整历史，仅投递新增消息；累计用量换算本轮差量，关闭或过期不自动重建。常驻会话受SESSION_LIMIT、空闲期限和轮数约束，登录前释放空闲会话，取消/失败/停用/撤销时回收。
 - 新增网页接口必须在统一register入口声明public/read/mutation/api权限，保持管理会话与API密钥分离。

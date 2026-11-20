@@ -1,6 +1,7 @@
 export const $=id=>document.getElementById(id);
 let csrf="";
 export function setCsrf(value){csrf=value||"";}
+export function socketProtocols(){return ["ai-bridge","csrf."+csrf];}
 export function el(tag,value="",className=""){const node=document.createElement(tag);node.textContent=value;node.className=className;return node;}
 export function note(id,value,error=false){const node=typeof id==="string"?$(id):id;if(node){node.textContent=value;node.className="feedback"+(error?" error":"");}}
 export async function api(path,{method="GET",data,signal}={}){
@@ -10,7 +11,11 @@ export async function api(path,{method="GET",data,signal}={}){
     const error=Error(value.error?.message||"操作失败");error.code=value.error?.code;error.status=response.status;error.request_id=value.error?.request_id;throw error;}
   return value;
 }
-export function fmtDate(value,short=false){if(!value||!Number.isFinite(Date.parse(value)))return"—";return new Date(value).toLocaleString("zh-CN",{timeZone:"Asia/Shanghai",hour12:false,...(short?{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}:{})});}
+export function fmtDate(value){
+  if(!value||!Number.isFinite(Date.parse(value)))return "—";
+  const parts=new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).formatToParts(new Date(value));
+  const p=Object.fromEntries(parts.map(x=>[x.type,x.value]));return p.year+"/"+p.month+"/"+p.day+" "+p.hour+":"+p.minute+":"+p.second;
+}
 export function number(value){return Number.isFinite(value)?new Intl.NumberFormat("zh-CN").format(value):"未报告";}
 export function bytes(value){return Number.isFinite(value)?(value/1024/1024).toFixed(1)+" MB":"未运行";}
 export function emptyRows(target,message,columns){target.replaceChildren();const row=el("tr"),cell=el("td",message,"empty");cell.colSpan=columns;row.append(cell);target.append(row);}

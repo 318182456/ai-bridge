@@ -1,3 +1,16 @@
+import {BrowserEngine} from "./backends/browser-engine.mjs";
+import {modelCatalog,publicModels} from "./backends/catalog.mjs";
+import {GoogleGrants} from "./backends/google-grants.mjs";
+import {GoogleAuthorization} from "./backends/authorization.mjs";
+import {GoogleAccounts} from "./backends/google-store.mjs";
+import {Robin} from "./backends/robin.mjs";
+import {BackendAccounts,registerBackendAccounts} from "./backends/accounts.mjs";
+import {Upgrades} from "./runtime/upgrades.mjs";
+import {AIStudio} from "./backends/aist.mjs";
+import {registerAIStudio} from "./backends/routes.mjs";
+import {Backends,registerBackends} from "./backends/registry.mjs";
+import {Tasks,registerTasks} from "./tasks.mjs";
+import {registerQueue} from "./admin/queue.mjs";
 import {Logger} from "./runtime/logger.mjs";
 import {Quotas} from "./services/quota.mjs";
 import {registerAdmin} from "./admin/routes.mjs";
@@ -83,7 +96,7 @@ export async function createApplication(options = {}) {
     store,
     keyrings: runner.keyrings,
     logger,
-    verify: (id, log) => verifyAccount(id, undefined, log),
+    verify: (id, log, signal) => verifyAccount(id, signal, log),
     beforeLogin: () => sessions.closeWhere(() => true),
   });
   const routes = [];
@@ -99,6 +112,16 @@ export async function createApplication(options = {}) {
     res.end(JSON.stringify(value));
   };
   const quotas=new Quotas({store,runner,queue,logger});
+  const tasks=new Tasks({queue});
+  const backends=new Backends();
+  const googleAccounts=new GoogleAccounts(dataDir),googleGrants=new GoogleGrants(dataDir);
+  if(options.aistudio)backends.register("aist",options.aistudio);
+  else backends.register("aist",new AIStudio({dataDir,logger,engine:new BrowserEngine({root:dataDir,logger,accounts:googleAccounts})}));
+  backends.register("robin",options.robin||new Robin({dataDir,logger,accounts:googleAccounts,tokenProvider:id=>googleGrants.robinToken(id)}));
+  const googleAuthorization=new GoogleAuthorization({accounts:googleAccounts,grants:googleGrants,store,loginManager,robin:backends.get("robin")});
+  if(!options.aistudio)backends.get("aist").engine.authorize=googleAuthorization.authorize.bind(googleAuthorization);
+  const backendAccounts=new BackendAccounts({backends,queue,sessions,logger});
+  backends.register("agy",{status:()=>({state:"managed",active_requests:queue.running}),close:async()=>{}});
   async function perform(params, signal, context={}) {
     const existing = params.session_id && params.session_id !== "new" ? sessions.get(params.session_id, context.owner) : null;
     if (existing && params.account && params.account !== existing.account)
@@ -111,7 +134,7 @@ export async function createApplication(options = {}) {
     const queued=Date.now(),id=context.id||randomUUID();
     context.stage="queue";
     logger.info("request.queued",{request_id:id,account_id:selected,model:params.model||"默认模型",api_key_name:context.key_name||"管理台"});
-    return queue.add(async()=>{
+    return queue.add(async(jobSignal)=>{
       context.assertActive?.();
       if(context.key_id)store.assertKeyActive(context.key_id);
       const a=store.pick(selected,model),started=Date.now();
@@ -128,7 +151,7 @@ export async function createApplication(options = {}) {
         if (turn?.session.closed) throw new AppError(410, "会话已关闭，请开始新会话", "session_closed");
         if (context.key_id) store.assertKeyActive(context.key_id);
         store.pick(selected, model);
-        const result=await runner.execute(a.id,{prompt:turn?.prompt ?? params.prompt,model,schema:params.schema,effort:params.effort,signal,sessionId:turn?.session.id});
+        const result=await runner.execute(a.id,{prompt:turn?.prompt ?? params.prompt,model,schema:params.schema,effort:params.effort,signal:jobSignal,sessionId:turn?.session.id});
         result.assistant=toolMessage(result,params.tooling);
         if (turn) result.session = sessions.complete(turn.session, {messages: params.messages, assistant: result.assistant});
         a.successes++;a.total_tokens+=result.usage?.total_tokens||0;
@@ -154,14 +177,20 @@ export async function createApplication(options = {}) {
         logger.warn("request.failed",{request_id:id,account_id:a.id,model:params.model||"默认模型",status:error.status||500,code:error.code||"internal_error",duration_ms:Date.now()-started});
         throw error;
       }
-    },signal,{key:selected});
+    },signal,{key:selected,id,cancelable:true,metadata:{kind:"generation",account_name:context.account_name,model:model||"默认模型",source:context.key_id?"api":"panel",api_key_name:context.key_name||"管理台",summary:params.messages?.findLast(m=>m.role==="user")?.content||params.prompt,content:params.messages?JSON.stringify(params.messages,null,2):params.prompt}});
   }
   register("GET", "/health", "public", async ({ res }) =>
     send(res, { status: "ok", version }),
   );
   registerPages({register,publicDir});
-  registerAdmin({register,send,body,store,auth,queue,runner,logger,dataDir,version,quotas,sessions});
+  registerAdmin({register,send,body,store,auth,queue,runner,logger,dataDir,version,quotas,sessions,googleAccounts,backends});
   registerSessions({register,send,sessions});
+  registerQueue({register,send,queue});
+  registerBackends({register,send,backends});
+  registerBackendAccounts({register,send,body,backends,accounts:backendAccounts,owner:sessionOwner});
+  const aistChat=registerAIStudio({register,body,send,backends,queue,store,logger});
+  const robinChat=registerAIStudio({register,body,send,backends,queue,store,logger},"robin");
+  registerTasks({register,send,tasks,owner:sessionOwner});
   register("POST", "/auth/login", "public", async ({ req, res }) => {
     auth.sameOrigin(req);
     const input = await body(req);
@@ -178,6 +207,9 @@ export async function createApplication(options = {}) {
     "mutation",
     async ({ req, res, principal }) => {
       if (loginManager.current?.owner === principal.token) loginManager.close();
+      tasks.closeOwner(sessionOwner(principal));
+      backendAccounts.closeOwner(sessionOwner(principal));
+      upgrades.closeOwner(principal.token);
       await sessions.closeWhere(s => s.owner === sessionOwner(principal));
       auth.sessions.delete(principal.token);
       res.setHeader(
@@ -342,8 +374,8 @@ export async function createApplication(options = {}) {
     /^\/api\/accounts\/(a_[a-f0-9]{16})\/verify$/,
     "mutation",
     async ({ res, match, signal }) => {
-      const a = await queue.add(() => verifyAccount(match[1], signal), signal, {
-        key: match[1],
+      const a = await queue.add(jobSignal => verifyAccount(match[1], jobSignal), signal, {
+        key: match[1],cancelable:true,metadata:{kind:"verification",account_name:store.get(match[1]).name,summary:"校验模型目录和实际生成"},
       });
       send(res, {
         account: { ...a },
@@ -359,28 +391,27 @@ export async function createApplication(options = {}) {
       const a = await loginManager.finish(
         principal.token,
         match[1],
-        (onOutput) => verifyAccount(match[1], signal, onOutput),
+        (onOutput, jobSignal) => verifyAccount(match[1], jobSignal||signal, onOutput),
       );
       send(res, { account: { ...a }, note: "登录与实际生成均验证通过" });
     },
   );
-  register("POST", "/api/tasks", "mutation", async ({ req, res, signal, principal, requestId }) =>
-    send(res, await perform(promptInput(await body(req)), signal, {id:requestId, owner:sessionOwner(principal), assertActive:()=>auth.session(req)})),
-  );
-  register("GET", "/v1/models", "api", async ({ res }) => {
-    const models = new Set(
-      store
-        .list()
-        .filter((a) => a.enabled)
-        .flatMap((a) => a.models.map((m) => m.id)),
-    );
-    send(res, {
-      object: "list",
-      data: [...models]
-        .sort()
-        .map((id) => ({ id, object: "model", owned_by: "agy" })),
-    });
+  register("POST", "/api/tasks", "mutation", async ({ req, res, signal, principal, requestId }) => {
+    const input=await body(req),params=promptInput(input),owner=sessionOwner(principal);
+    if(input.background!=null&&typeof input.background!=="boolean")throw new AppError(400,"background 必须为布尔值");
+    const context={id:requestId,owner,assertActive:()=>auth.session(req)};
+    if(input.background===true){
+      send(res,tasks.start(requestId,owner,{prompt:params.prompt,model:params.model,account_id:params.account||null,session_id:params.session_id},async taskSignal=>{
+        try{return await perform(params,taskSignal,context);}catch(error){
+          if(!context.recorded){await store.event({id:requestId,account_id:context.account_id||null,account_name:context.account_name||null,api_key_id:"panel",api_key_name:"管理台",model:params.model||"默认模型",status:error.status||500,code:error.code||"internal_error",stage:context.stage||"request_prepare",duration_ms:0});logger.warn("request.failed",{request_id:requestId,status:error.status||500,code:error.code||"internal_error",stage:context.stage||"request_prepare"});}
+          throw error;
+        }
+      }),202);
+    }else send(res,await perform(params,signal,context));
   });
+  register("GET","/api/models/catalog","read",async({res})=>send(res,{models:await modelCatalog(store,backends)}));
+  register("GET","/v1/models","api",async({res})=>send(res,publicModels(await modelCatalog(store,backends))));
+  const backendCursors=new Map();
   register(
     "POST",
     "/v1/chat/completions",
@@ -390,6 +421,12 @@ export async function createApplication(options = {}) {
       store.beginKeyRequest(principal.key_id);
       logger.info("request.received",{request_id:requestId,api_key_id:principal.key_id,api_key_name:principal.key_name,stage:"request_prepare"});
       const input=await body(req);
+      let backend=input.backend||process.env.DEFAULT_BACKEND||"agy";
+      if(backend==="auto"){const model=(await modelCatalog(store,backends)).find(m=>m.id===input.model);const choices=[...new Set(model?.sources.filter(s=>s.available).map(s=>s.backend)||[])];if(!choices.length)throw new AppError(404,"没有支持此模型的已验证后端","model_not_found");const cursor=backendCursors.get(input.model)||0;backend=choices[cursor%choices.length];backendCursors.set(input.model,cursor+1);}
+      if(backend==="aist"||backend==="robin"){
+        return (backend==="aist"?aistChat:robinChat)({req,res,signal,principal,requestId},input);
+      }
+      if(backend!=="agy")throw new AppError(400,"后端尚不可用","backend_not_ready");
       context.model=typeof input.model==="string"?input.model.slice(0,160):"默认模型";
       const params=prepareChat(input,promptInput);
       if (params.ignoredParameters.length)
@@ -521,7 +558,7 @@ export async function createApplication(options = {}) {
       const status = e instanceof AppError ? e.status : 500;
       if(req.trace&&!req.trace.recorded){
         const t=req.trace;
-        if(!t.outcome)store.endKeyRequest(t.key_id,false);
+        if(!t.outcome){store.endKeyRequest(t.key_id,false);if(t.backend)store.endBackendRequest(t.backend,false);}
         await store.event({id:requestId,api_key_id:t.key_id,api_key_name:t.key_name,account_id:t.account_id||null,account_name:t.account_name||null,
           model:t.model||"未提供模型",status,code:e.code||"internal_error",message:e instanceof AppError?e.message:"内部错误",stage:t.stage,duration_ms:Date.now()-t.started}).catch(()=>{});
       }
@@ -539,6 +576,11 @@ export async function createApplication(options = {}) {
       else send(res, value, status === 499 ? 408 : status);
     }
   });
+  const upgrades=new Upgrades({server,auth});
+  upgrades.register(/^\/api\/backends\/aist\/login-view\/([a-f0-9-]{36})$/,async({principal,match,signal})=>{
+    backendAccounts.authorizeView(sessionOwner(principal),match[1]);
+    return backends.get("aist").loginSocket(match[1],signal);
+  });
   server.requestTimeout = 30000;
   server.headersTimeout = 10000;
   return {
@@ -550,12 +592,16 @@ export async function createApplication(options = {}) {
     loginManager,
     quotas,
     sessions,
+    tasks,
+    backends,
+    backendAccounts,
+    upgrades,
     logger,
-    catalog: routes.map(({ method, path, access }) => ({
+    catalog: [...upgrades.catalog(),...routes.map(({ method, path, access }) => ({
       method,
       path: String(path),
       access,
-    })),
+    }))],
   };
 }
 if (
@@ -568,9 +614,12 @@ if (
     app.logger.info("service.started",{version,port}),
   );
   const close = () => {
+    app.tasks.close();
+    app.backendAccounts.close();
+    app.upgrades.close();
     app.loginManager.close();
     app.server.close();
-    Promise.all([app.store.pending, app.runner.close()]).finally(() =>
+    Promise.all([app.store.pending, app.backends.close(), app.runner.close()]).finally(() =>
       process.exit(0),
     );
   };

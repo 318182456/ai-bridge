@@ -1,0 +1,22 @@
+import {gunzipSync} from "node:zlib";
+import {AppError} from "../common.mjs";
+const malformed=()=>new AppError(502,"Robin 协议数据无效","backend_protocol_error");
+// Protocol field numbers are interoperability facts; codec is implemented here.
+function integer(n){let v=BigInt(n);if(v<0n||v>0xffffffffffffffffn)throw malformed();const bytes=[];do{const b=Number(v&127n);v>>=7n;bytes.push(b|(v?128:0));}while(v);return Buffer.from(bytes);}
+export function message(entries){return Buffer.concat(entries.map(([field,value])=>{if(!Number.isInteger(field)||field<1||field>536870911)throw malformed();if(typeof value==="number"||typeof value==="bigint")return Buffer.concat([integer(field*8),integer(value)]);const bytes=typeof value==="string"?Buffer.from(value):Buffer.from(value);return Buffer.concat([integer(field*8+2),integer(bytes.length),bytes]);}));}
+export function fields(bytes){const b=Buffer.from(bytes);let offset=0,count=0;const result=[];function read(){let value=0n;for(let i=0;i<10;i++){if(offset>=b.length)throw malformed();const n=b[offset++];value|=BigInt(n&127)<<BigInt(i*7);if(!(n&128))return value;}throw malformed();}
+ while(offset<b.length){if(++count>100000)throw malformed();const key=read(),tag=Number(key>>3n),wire=Number(key&7n);if(tag<1||tag>536870911)throw malformed();let value;if(wire===0)value=read();else if(wire===2){const n=read();if(n>BigInt(b.length-offset))throw malformed();value=b.subarray(offset,offset+Number(n));offset+=Number(n);}else if(wire===1||wire===5){const n=wire===1?8:4;if(offset+n>b.length)throw malformed();value=b.subarray(offset,offset+n);offset+=n;}else throw malformed();result.push({tag,wire,value});}return result;
+}
+export const first=(data,tag)=>fields(data).find(f=>f.tag===tag);
+export const string=(data,tag)=>{const f=first(data,tag);return f?.wire===2?f.value.toString("utf8"):"";};
+export function grpc(payload){const bytes=Buffer.from(payload),header=Buffer.alloc(5);header.writeUInt32BE(bytes.length,1);return Buffer.concat([header,bytes]);}
+export class GrpcDecoder {
+ constructor(){this.buffer=Buffer.alloc(0);}
+ feed(chunk){this.buffer=Buffer.concat([this.buffer,chunk]);const output=[];while(this.buffer.length>=5){const flag=this.buffer[0],size=this.buffer.readUInt32BE(1);if(size>8*1024*1024||flag>1)throw malformed();if(this.buffer.length<5+size)break;let payload=this.buffer.subarray(5,5+size);this.buffer=this.buffer.subarray(5+size);if(flag)try{payload=gunzipSync(payload,{maxOutputLength:8*1024*1024});}catch{throw malformed();}output.push(payload);}return output;}
+ finish(){if(this.buffer.length)throw malformed();}
+}
+export function queryFrames(text,mode,thinking){const client=message([[4,2],[16,mode]]),context=message([[13,client],...(thinking?[[48,thinking]]:[])]),initial=message([[1000,message([[1,message([[4,2]])],[2,message([[1,text]])],[8,1],[1001,message([[1,context]])]])]]);return[{data:initial,delay:900},{data:message([[1007,message([[1,text]])]]),delay:500},{data:message([[1007,message([[2,Buffer.alloc(0)]])]]),delay:0}];}
+export function decodeModes(payload){const parsed=fields(payload),allowed=new Set();const hasAllowlist=parsed.some(f=>f.tag===18);for(const f of parsed.filter(f=>f.tag===18&&f.wire===2))for(const item of fields(f.value))if(item.tag===1&&item.wire===2)allowed.add(item.value.toString("utf8"));
+ return parsed.filter(f=>f.tag===17&&f.wire===2).map(f=>{const mode=string(f.value,1),name=string(f.value,26)||string(f.value,19)||string(f.value,22),slug=name.toLowerCase().replace(/[^a-z0-9.]+/g,"-").replace(/^-|-$/g,"");return{mode,id:slug.startsWith("gemini-")?slug:"gemini-"+slug,name};}).filter(m=>m.mode&&m.name&&(!hasAllowlist||allowed.has(m.mode)));
+}
+export function decodeAnswer(payload){const result={shards:[],done:false,conversation:"",model:"",effectiveMode:""};for(const f of fields(payload)){if(f.tag!==1003||f.wire!==2)continue;const wrapper=fields(f.value);if(wrapper.some(x=>x.tag===2)){result.done=true;continue;}const content=wrapper.find(x=>x.tag===1&&x.wire===2)?.value;if(!content)continue;for(const item of fields(content).filter(x=>x.tag===1&&x.wire===2)){const nested=first(item.value,2);result.shards.push({id:string(item.value,1),text:string(item.value,7)||(nested?.wire===2?string(nested.value,1):""),done:first(item.value,19)?.value===2n});}const conv=first(content,2);if(conv?.wire===2)result.conversation=string(conv.value,1);result.model=string(content,30);result.effectiveMode=string(content,25);}return result;}

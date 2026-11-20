@@ -23,7 +23,7 @@ $("loginForm").onsubmit=async event=>{event.preventDefault();const button=$("log
   try{const session=await api("/auth/login",{method:"POST",data:{password:$("password").value}});$("password").value="";setCsrf(session.csrf);await showWorkspace();}
   catch(error){note("loginFeedback",error.message,true);}finally{button.disabled=false;}
 };
-$("logout").onclick=async()=>{try{await api("/auth/logout",{method:"POST",data:{}});}finally{sessionStorage.removeItem("agy.lastLogin");showLogin();}};
+$("logout").onclick=async()=>{try{await api("/auth/logout",{method:"POST",data:{}});}finally{sessionStorage.removeItem("agy.lastLogin");sessionStorage.removeItem("agy.lastTask");showLogin();}};
 $("refresh").onclick=async()=>{const button=$("refresh");button.disabled=true;try{await ctx.refresh();note("pageFeedback","已更新");}catch(e){note("pageFeedback",e.message,true);}finally{button.disabled=false;}};
 const closeNav=()=>{document.body.classList.remove("nav-open");$("navBackdrop").hidden=true;$("menuToggle").setAttribute("aria-expanded","false");};
 $("menuToggle").onclick=()=>{const open=!document.body.classList.contains("nav-open");document.body.classList.toggle("nav-open",open);$("navBackdrop").hidden=!open;$("menuToggle").setAttribute("aria-expanded",String(open));};

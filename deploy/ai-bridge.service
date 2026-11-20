@@ -1,0 +1,36 @@
+[Unit]
+Description=AI Bridge
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ai-bridge
+Group=ai-bridge
+WorkingDirectory=/var/lib/ai-bridge
+EnvironmentFile=/etc/ai-bridge/ai-bridge.env
+Environment=DATA_DIR=/var/lib/ai-bridge
+Environment=AGY_BIN=/opt/ai-bridge/current/bin/agy
+Environment=AGY_CLI_DISABLE_AUTO_UPDATE=true
+Environment=PATH=/opt/ai-bridge/current/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/opt/ai-bridge/current/bin/node /opt/ai-bridge/current/src/server.mjs
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ai-bridge
+UMask=0077
+TasksMax=256
+MemoryHigh=1536M
+MemoryMax=2G
+CPUWeight=50
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ai-bridge
+
+[Install]
+WantedBy=multi-user.target

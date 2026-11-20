@@ -1,3 +1,4 @@
+import {fileURLToPath} from "node:url";
 import { mkdir, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
@@ -52,7 +53,8 @@ export class LoginManager {
       url: s.submitted || s.onboarding?.done.has("complete") ? null : loginDisplay(s.raw).url,
     };
   }
-  start(owner, id) {
+  start(owner, id, options={}) {
+    if(options.withinExclusive&&(!this.queue.exclusive||this.queue.running!==1))throw new AppError(409,"共享授权必须持有排他队列");
     accountId(id);
     this.store.get(id);
     if (
@@ -62,8 +64,7 @@ export class LoginManager {
     )
       return this.view(owner, id);
     if (
-      this.queue.running ||
-      this.queue.waiting.length ||
+      (!options.withinExclusive&&(this.queue.running||this.queue.waiting.length)) ||
       (this.current && activeStates.has(this.current.state))
     )
       throw new AppError(409, "请等待当前任务或登录完成");
@@ -78,10 +79,14 @@ export class LoginManager {
       checkingPromise: null,
     });
     this.logger?.info("login.started",{account_id:id});
-    s.work = this.queue
-      .add(
-        async () => {
+    const schedule=options.withinExclusive?(action)=>Promise.resolve().then(()=>action(options.signal)):this.queue.add.bind(this.queue);
+    s.work = schedule(
+        async (signal) => {
+          s.signal = signal;
           let timer, keyring;
+          const interrupted=()=>{s.state="stopped";this.kill(s);};
+          signal?.addEventListener("abort",interrupted,{once:true});
+          if(signal?.aborted)interrupted();
           try {
             await this.beforeLogin?.();
             const p = await profilePaths(this.dataDir, id);
@@ -99,6 +104,7 @@ export class LoginManager {
               "ALL_PROXY",
               "NO_PROXY",
               "SSL_CERT_FILE",
+              "AGY_BIN",
             ];
             const env = Object.fromEntries(
               allowed
@@ -115,7 +121,7 @@ export class LoginManager {
             // ASVS V1.2.5: fixed command only; web input reaches the CLI PTY, never a shell command.
             const child = (s.child = this.launch(
               "/usr/bin/script",
-              ["-q", "-e", "-c", "/app/scripts/login-pty.sh", "/dev/null"],
+              ["-q", "-e", "-c", "exec sh "+"'"+fileURLToPath(new URL("../scripts/login-pty.sh",import.meta.url)).replaceAll("'","'\\''")+"'", "/dev/null"],
               {
                 cwd: workspace,
                 env,
@@ -179,6 +185,7 @@ export class LoginManager {
             s.state = "failed";
             this.append(s, "\n[启动错误] " + error.message + "\n");
           } finally {
+            signal?.removeEventListener("abort",interrupted);
             clearTimeout(timer);
             clearTimeout(s.verifyTimer);
             s.onboarding?.close();
@@ -187,10 +194,11 @@ export class LoginManager {
           }
         },
         undefined,
-        { key: id, exclusive: true },
+        {key:id,exclusive:true,cancelable:true,metadata:{kind:"login",account_name:this.store.get(id).name,summary:"Google 官方登录与首次设置"},
+          checkCancelable:()=>{if(s.state==="checking")throw new AppError(409,"正在校验，请等待校验结束后再取消登录");},onCancel:()=>this.stop(owner,id)},
       )
       .catch(() => {
-        s.state = "failed";
+        if (activeStates.has(s.state)) s.state = "failed";
       });
     return this.view(owner, id);
   }
@@ -245,7 +253,7 @@ export class LoginManager {
       }
       s.autoVerified = true;
       s.setup = "正在验证登录和实际调用…";
-      this.finish(s.owner, s.id, (log) => this.verify(s.id, log))
+      this.finish(s.owner, s.id, (log, signal) => this.verify(s.id, log, signal))
         .then(() => { s.setup = "登录与实际调用通过，可以启用账号。"; })
         .catch(() => { s.autoVerified = false; s.setup = "自动校验未通过，原始错误见完整日志；可在此重试校验。"; });
     }, 3000);
@@ -271,10 +279,10 @@ export class LoginManager {
       s,
       "\n[网页] 正在验证已保存的登录状态；不会提前终止官方登录进程。\n",
     );
-    const run = () => verify((part) => this.append(s, part));
+    const run = (signal) => verify((part) => this.append(s, part),signal||s.signal);
     const work = s.child
-      ? Promise.resolve().then(run)
-      : this.queue.add(run, undefined, { key: id, exclusive: true });
+      ? Promise.resolve().then(()=>run(s.signal))
+      : this.queue.add(run, undefined, {key:id,exclusive:true,cancelable:true,metadata:{kind:"verification",account_name:this.store.get(id).name,summary:"校验已保存的登录状态"}});
     s.checkingPromise = work.catch(() => {});
     try {
       const value = await work;

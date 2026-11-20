@@ -90,10 +90,8 @@ if (
   createHash("sha256").update(archive).digest("hex") !== digests[process.arch]
 )
   throw Error("CLI SHA-256 mismatch");
-await writeFile("/tmp/agy.tar.gz", archive);
-await mkdir("/etc/ssl/certs", { recursive: true });
-await writeFile(
-  "/etc/ssl/certs/ca-certificates.crt",
-  rootCertificates.join("\n") + "\n",
-);
+await writeFile(process.env.CLI_ARCHIVE_PATH||"/tmp/agy.tar.gz", archive);
+if(process.env.CLI_CA_BUNDLE){
+ const {dirname}=await import("node:path");await mkdir(dirname(process.env.CLI_CA_BUNDLE),{recursive:true});await writeFile(process.env.CLI_CA_BUNDLE,rootCertificates.join("\n")+"\n");
+}
 console.log("Official agy " + version + " SHA-256 verified");

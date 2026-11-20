@@ -1,0 +1,53 @@
+name: Native Linux packages
+on:
+  workflow_dispatch:
+  push:
+    branches: [agy]
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  assemble:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            architecture: amd64
+          - runner: ubuntu-22.04-arm
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - name: Validate installer syntax
+        run: sh -n scripts/install.sh
+      - name: Install browser runtime for smoke test
+        run: npx --no-install playwright-core install --with-deps chromium --no-shell
+      - name: Verify sandboxed browser lifecycle
+        run: node scripts/check-browser.mjs
+      - name: Download and verify pinned official agy
+        env:
+          CLI_ARCHIVE_PATH: ${{ runner.temp }}/agy.tar.gz
+        run: |
+          node scripts/install-cli.mjs
+          mkdir -p "$RUNNER_TEMP/ai-bridge-cli"
+          tar -xzf "$RUNNER_TEMP/agy.tar.gz" -C "$RUNNER_TEMP/ai-bridge-cli" antigravity
+      - name: Assemble native archive
+        env:
+          NATIVE_AGY_BIN: ${{ runner.temp }}/ai-bridge-cli/antigravity
+          RELEASE_DIR: ${{ runner.temp }}/ai-bridge-release
+          BROWSER_SMOKE_VERIFIED: 'true'
+        run: node scripts/package-native.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-bridge-linux-${{ matrix.architecture }}
+          path: |
+            ${{ runner.temp }}/ai-bridge-release/*.tar.gz
+            ${{ runner.temp }}/ai-bridge-release/*.sha256
+          retention-days: 14

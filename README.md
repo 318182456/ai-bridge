@@ -1,6 +1,31 @@
-# AGY Docker
+# AI Bridge
 
-在 Docker 中启动真正的官方 Antigravity CLI（`agy`），通过网页或受保护接口提交文本任务。CLI 自行完成 Google 认证与上游通信；项目不读取、复制或转发 OAuth Token，也不实现 Google 内部生成接口。
+同一 Node.js 服务管理 agy、Robin、AI Studio 三条后端，不连接外部反代服务。agy 运行固定版本的官方 CLI；Robin 和 AI Studio 仅参考协议独立实现，没有合并参考项目源码，不依赖 Go/C++ 编译器。Chromium 和官方 CLI 使用预编译运行时。
+
+## 当前开发状态
+
+本地版本 `0.4.0-alpha.1`：三后端代码、共享调度、统一 Google 登录编排和 Linux 安装器已实现。自动化测试和模拟浏览器操作已通过；**真实 Google 的三后端授权与生成、Linux 安装和 NAS 新镜像尚未完成验证**，不能据此认定全部可用。发布文件尚未上传时，一键安装命令无法使用。
+
+一次 Google 网页登录复用同一受限浏览器资料目录，依次申请各产品授权。每个产品独立执行实际生成验证，未授权或验证失败显示单独状态；不将 agy 凭据提取后冒充其他产品认证。Google 仍可能要求分别确认授权，或拒绝账号、地区、产品权限。
+
+## 运行与接口
+
+- 默认 `DEFAULT_BACKEND=agy`，统一 `/v1/models` 合并启用账号的缓存模型目录；同名模型保留来源信息。
+- `/v1/chat/completions` 可以传 `backend: "agy" | "robin" | "aist"`；`auto` 仅按目录选择来源，不将失败生成跨后端重放。
+- `/aist/v1/models`、`/aist/v1/chat/completions` 和 `/robin/v1/...` 用于明确指定来源，使用同一项目 API 密钥。
+- agy 与 Robin 的客户端工具通过结构化输出适配，由客户端执行；AI Studio 转换原生函数声明和调用结果。三条路径的能力不同，不能当作完全等价的官方 API。
+- 当前浏览器与 Robin 生成先收集结果再输出 SSE，并以 `x-stream-mode: buffered` 标识；不是逐 Token 实时流。未上报用量不估算。
+- 显式 `session_id` 仅用于 agy；AI Studio 和 Robin 请求独立。未知或不支持的参数应明确报错或标记未生效。
+
+## 资源与部署
+
+三个后端共享全局并发预算，默认 1；登录排他。浏览器按需下载、启动，同一时刻只有一个账号资料目录，空闲约两分钟回收。模型目录读取使用缓存，不启动浏览器。实际进程树消耗尚未测量，不提供未经测量的 VPS 内存承诺。
+
+Docker 使用版本化 GHCR 镜像；原生 Linux 发行包包含 Node.js 与经 SHA-256 校验的官方 CLI，不在 VPS 编译源码。`scripts/install.sh --version VERSION` 面向 Debian/Ubuntu + systemd、amd64/arm64；发布后从同一 GitHub Release 获取对应架构包及校验文件。配置 `/etc/ai-bridge/ai-bridge.env`，数据 `/var/lib/ai-bridge`，程序 `/opt/ai-bridge`，更新保留配置和数据。
+
+Chromium 默认启用沙盒；部署主机需支持其系统运行依赖与用户命名空间。首个 Google 登录需要下载浏览器且可能较慢。授权资料和 API 密钥均在受限数据目录内，不能提交 Git、放入截图或原始日志。
+
+已有 NAS 部署保持 `/volume1/docker/agy-docker/data` 的原挂载和现有域名，应用改名不应创建空数据目录。新镜像通过 CI 构建，更新前检查任务队列并备份配置与状态；不在 NAS 本地编译。
 
 ## 当前功能
 
@@ -28,7 +53,7 @@ docker compose up -d
 
 | 变量 | 默认/用途 |
 | --- | --- |
-| `IMAGE_TAG` | `0.3.0`，发布版本；按需升级 |
+| `IMAGE_TAG` | `0.4.0-alpha.1`，发布版本；按需升级 |
 | `ADMIN_PASSWORD` | 管理页登录密码，至少20字符 |
 | `API_KEY` | 客户端Bearer密钥，至少20字符，须与管理密码不同 |
 | `PORT` / `BIND_ADDRESS` | `18861` / `0.0.0.0`，宿主机访问入口 |

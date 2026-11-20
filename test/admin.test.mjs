@@ -89,3 +89,18 @@ test("pre-existing metadata files migrate without losing accounts or counters",a
  const store=await new Store(dir).init();assert.equal(store.get("a_0123456789abcdef").requests,15);assert.equal(store.state.settings.log_retention_days,7);assert.equal(store.state.keys.length,0);assert.equal(store.state.cursor,4);}
  finally{await rm(dir,{recursive:true,force:true});}
 });
+
+
+test("background task and queue APIs require session/CSRF, retain results and authorize the creator",()=>fixture(async({call,account,app})=>{
+ await account();
+ const denied=await call("/api/queue",{headers:{cookie:"",authorization:"Bearer "+master}});assert.equal(denied.status,401);
+ const accepted=await call("/api/tasks",{method:"POST",data:{prompt:"background task fixture",background:true}});assert.equal(accepted.status,202);
+ const task=await accepted.json();let view;
+ for(let i=0;i<80;i++){view=await(await call("/api/tasks/"+task.id)).json();if(view.state==="completed")break;await new Promise(r=>setTimeout(r,10));}
+ assert.equal(view.state,"completed");assert.ok(view.result.response);assert.equal(view.result.request_id,task.id);
+ assert.equal((await call("/api/tasks/"+task.id,{headers:{cookie:""}})).status,401);
+ const login=await call("/auth/login",{method:"POST",data:{password}}),foreign=login.headers.get("set-cookie").split(";")[0];
+ assert.equal((await call("/api/tasks/"+task.id,{headers:{cookie:foreign}})).status,404);
+ assert.equal((await call("/api/tasks/"+task.id,{method:"DELETE",data:{},headers:{"x-csrf-token":""}})).status,403);
+ assert.ok(app.store.state.events.some(e=>e.id===task.id));
+}));

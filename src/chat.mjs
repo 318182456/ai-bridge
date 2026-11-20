@@ -180,3 +180,5 @@ export function toolMessage(result, tooling) {
   if (!calls.length && !value.content.trim()) invalid();
   return {role: "assistant", content: value.content || null, ...(calls.length ? {tool_calls: calls} : {})};
 }
+
+export function compileToolSchema(parameters){return compile(parameters);}

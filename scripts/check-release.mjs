@@ -1,0 +1,12 @@
+import {access,readFile} from "node:fs/promises";
+import {constants} from "node:fs";
+import {resolve,dirname} from "node:path";
+import {fileURLToPath} from "node:url";
+const root=resolve(dirname(fileURLToPath(import.meta.url)),"..");
+const fail=()=>{throw Error("Incomplete AI Bridge release; all three built-in backends are required");};
+const manifest=JSON.parse(await readFile(resolve(root,"release.json"),"utf8"));
+if(manifest.format!==1||!["linux-amd64","linux-arm64"].includes(manifest.platform))fail();
+for(const id of ["agy","robin","aist"])if(manifest.backends?.[id]?.implemented!==true)fail();
+for(const file of ["bin/node","bin/agy"])await access(resolve(root,file),constants.X_OK);
+for(const file of ["src/backends/robin.mjs","src/backends/browser-engine.mjs","node_modules/playwright-core/cli.js"])await access(resolve(root,file));
+console.log("AI Bridge release layout verified");

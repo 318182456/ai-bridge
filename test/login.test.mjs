@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { SerialQueue } from "../src/queue.mjs";
 import { LoginManager, loginDisplay } from "../src/login.mjs";
 import { Store } from "../src/store.mjs";
@@ -91,7 +91,7 @@ test("login code is one-shot, owner-bound, excluded from environment and fully v
         "-q",
         "-e",
         "-c",
-        "/app/scripts/login-pty.sh",
+        "exec sh "+"'"+resolve("scripts/login-pty.sh")+"'",
         "/dev/null",
       ]);
       assert.equal(options.cwd, join(dir, "accounts", a.id, "login-workspace"));
