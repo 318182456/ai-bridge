@@ -22,23 +22,23 @@ export class AIStudio {
   if(method==="GET"&&path==="/api/accounts")return this.result("accounts",{},signal);
   if(method==="GET"&&path==="/api/models")return this.result("models",{},signal);
   if(method==="GET"&&path==="/api/status")return this.status();
-  if(method==="GET"&&path==="/api/accounts/tasks")return{tasks:[...this.tasks.values()].map(t=>({id:t.id,view:t.view,state:t.state,items:t.items}))};
+  if(method==="GET"&&path==="/api/accounts/tasks")return{tasks:[...this.tasks.values()].map(t=>({id:t.id,view:t.view,state:t.state,items:t.items,error:t.error||null}))};
   if(method==="POST"&&(path==="/api/accounts"||/^\/api\/accounts\/[^/]+\/login$/.test(path))){
    if([...this.tasks.values()].some(t=>t.state==="running"))throw new AppError(409,"已有 Google 登录在进行");
    for(const [id,t]of this.tasks)if(t.state!=="running")this.tasks.delete(id);
    const task={id:randomUUID(),view:input.view,state:"running",items:[{state:"running",step:"login",label:""}],controller:new AbortController(),clients:new Set()};this.tasks.set(task.id,task);
    task.work=(async()=>{try{for await(const event of this.engine.run("login",{locale:input.locale||"zh-CN",timezone:input.timezone||"Asia/Shanghai",proxy:input.proxy||"",owner:input.owner,account_id:path!=="/api/accounts"?decodeURIComponent(path.split("/")[3]):null},task.controller.signal)){
       task.nativeId=event.native_job;
-      if(event.browser_meta){task.lastMeta=event.browser_meta;for(const client of task.clients)if(client.readyState===1&&client.bufferedAmount<1024*1024)client.send(JSON.stringify(event.browser_meta));}
-      if(event.browser_binary){const bytes=Buffer.from(event.browser_binary,"base64");for(const client of task.clients)if(client.readyState===1&&client.bufferedAmount<1024*1024)client.send(bytes,{binary:true});}
+      if(event.browser_meta){task.lastMeta=event.browser_meta;if(event.browser_meta.type==="frame")task.frameMeta=event.browser_meta;for(const client of task.clients)if(client.readyState===1&&client.bufferedAmount<1024*1024)client.send(JSON.stringify(event.browser_meta));}
+      if(event.browser_binary){const bytes=Buffer.from(event.browser_binary,"base64");if(bytes.length<=1024*1024)task.lastFrame=bytes;for(const client of task.clients)if(client.readyState===1&&client.bufferedAmount<1024*1024)client.send(bytes,{binary:true});}
       if(event.result?.account){task.items=[{state:"done",label:event.result.account.email}];task.result=event.result;}
-    }task.state="done";}catch(e){task.state="failed";task.items=[{state:"failed",label:""}];this.logger?.warn("backend.login_failed",{stage:"aist",code:e.code||"native_login_failed"});}finally{for(const client of task.clients)client.close(1000);task.clients.clear();task.lastMeta=null;task.nativeId=null;}})();
+    }task.state="done";}catch(e){task.state="failed";task.error={status:e instanceof AppError?e.status:503,code:e.code||"native_login_failed",message:e instanceof AppError?e.message:"Google 登录未完成，请重试"};task.items=[{state:"failed",label:""}];this.logger?.warn("backend.login_failed",{stage:"aist",code:e.code||"native_login_failed"});}finally{for(const client of task.clients)client.close(1000);task.clients.clear();task.lastMeta=null;task.frameMeta=null;task.lastFrame=null;task.nativeId=null;}})();
    return{task:{id:task.id,view:task.view,state:task.state,items:task.items}};
   }
   if(method==="DELETE"&&path.startsWith("/api/accounts/tasks/")){const id=decodeURIComponent(path.split("/").at(-1));const task=this.tasks.get(id);task?.controller.abort();await task?.work;return{};}
   if(method==="PUT"&&/^\/api\/accounts\/[^/]+$/.test(path))return this.result("set_enabled",{id:decodeURIComponent(path.split("/").at(-1)),enabled:input.enabled},signal);
   throw new AppError(400,"不支持此 AI Studio 操作");
  }
- async loginSocket(view){const task=[...this.tasks.values()].find(t=>t.view===view&&t.state==="running");if(!task)throw new AppError(404,"登录窗口已结束");return{attach:socket=>{task.clients.add(socket);if(task.lastMeta)socket.send(JSON.stringify(task.lastMeta));socket.on("message",(data,binary)=>{if(binary||!task.nativeId)return;let value;try{value=JSON.parse(data.toString());}catch{return;}if(["pointer","wheel","key","text","dialog"].includes(value.type))this.engine.input(task.nativeId,value);});socket.once("close",()=>task.clients.delete(socket));},release:()=>{}};}
+ async loginSocket(view){const task=[...this.tasks.values()].find(t=>t.view===view&&t.state==="running");if(!task)throw new AppError(404,"登录窗口已结束");return{attach:socket=>{task.clients.add(socket);if(task.lastMeta)socket.send(JSON.stringify(task.lastMeta));if(task.frameMeta&&task.lastFrame){socket.send(JSON.stringify(task.frameMeta));socket.send(task.lastFrame,{binary:true});}socket.on("message",(data,binary)=>{if(binary||!task.nativeId)return;let value;try{value=JSON.parse(data.toString());}catch{return;}if(["pointer","wheel","key","text","dialog"].includes(value.type))this.engine.input(task.nativeId,value);});socket.once("close",()=>task.clients.delete(socket));},release:()=>{}};}
  async close(){for(const task of this.tasks.values())task.controller.abort();await Promise.allSettled([...this.tasks.values()].map(t=>t.work));await this.engine.close();}
 }

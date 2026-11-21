@@ -10,7 +10,7 @@ export function mountGoogleLogin(ctx,{onChange=async()=>{},onOpen=()=>{}}={}){
    socket=new WebSocket(url,socketProtocols());socket.binaryType="blob";let meta;
    socket.onmessage=async event=>{
      if(disposed)return;
-     if(typeof event.data==="string"){try{const value=JSON.parse(event.data);if(value.type==="status")$("aistLoginStatus").textContent=({preparing:"准备浏览器，首次使用可能需要下载…",starting:"准备登录浏览器…",waiting:"请在下方 Google 页面完成登录",saving:"登录已识别，正在验证并保存账号"})[value.status]||"正在登录";else if(value.type==="dialog")note("aistFeedback","Google 页面需要处理浏览器确认，请检查登录画面",true);else meta=value;}catch{}return;}
+     if(typeof event.data==="string"){try{const value=JSON.parse(event.data);if(value.type==="status")$("aistLoginStatus").textContent=({preparing:"准备浏览器，首次使用可能需要下载…",starting:"正在连接 Google 登录页…",waiting:"请在下方 Google 页面完成登录",saving:"登录已识别，正在验证并保存账号"})[value.status]||"正在登录";else if(value.type==="dialog")note("aistFeedback","Google 页面需要处理浏览器确认，请检查登录画面",true);else meta=value;}catch{}return;}
      if(!meta||!Number.isFinite(meta.width)||meta.width>4096||meta.height>4096)return;
      const current=++sequence,bitmap=await createImageBitmap(event.data);if(disposed||current!==sequence){bitmap.close();return;}
      const canvas=$("googleCanvas");canvas.width=bitmap.width;canvas.height=bitmap.height;canvas.getContext("2d").drawImage(bitmap,0,0);bitmap.close();frame=meta;$("googleBrowser").hidden=false;

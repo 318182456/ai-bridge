@@ -28,3 +28,9 @@ test("Google login frames are owner-bound, Origin/CSRF protected and revoked on 
   const closed=new Promise(r=>ws.once("close",r));await call(owner,"/auth/logout","POST",{});await closed;for(let i=0;i<100&&app.queue.running;i++)await sleep(10);assert.equal(stopped,true);assert.equal(app.queue.running,0);assert.ok(app.catalog.some(r=>r.method==="UPGRADE"&&r.access==="upgrade"));
  }finally{ws?.terminate();app.backendAccounts.close();app.upgrades.close();await app.backends.close();app.loginManager.close();await app.runner.close();app.server.closeAllConnections();await new Promise(r=>app.server.close(r));await app.store.pending;await rm(dir,{recursive:true,force:true});}
 });
+
+
+test("late login viewers receive the latest frame without waiting for a new screenshot",async()=>{
+ let unblock;const gate=new Promise(r=>unblock=r);const engine={async *run(){yield{native_job:'test',browser_meta:{type:'frame',context:'test',width:100,height:100}};yield{native_job:'test',browser_binary:Buffer.from('synthetic-frame').toString('base64')};await gate;},close:async()=>{}};
+ const backend=new AIStudio({engine});try{const {task}=await backend.admin('/api/accounts',{method:'POST',json:{view:'synthetic-view'}});for(let i=0;i<20&&!backend.tasks.get(task.id).lastFrame;i++)await sleep(5);const sent=[],socket={readyState:1,send:(data,options)=>sent.push({data,options}),on(){},once(){},close(){}};const link=await backend.loginSocket('synthetic-view');link.attach(socket);assert.ok(sent.some(v=>v.options?.binary&&v.data.toString()==='synthetic-frame'));unblock();await backend.tasks.get(task.id).work;assert.equal(backend.tasks.get(task.id).lastFrame,null);}finally{unblock();await backend.close();}
+});

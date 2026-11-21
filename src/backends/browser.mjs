@@ -29,8 +29,9 @@ export class GoogleBrowser {
   if(!this.context){this.starting=(async()=>{
    await this.prepare();if(this.closed||signal?.aborted)throw new AppError(499,"请求已取消","cancelled");this.phase="starting";
    const dir=join(this.root,"profiles",profile);await this.authVault?.restore("google",profile);await mkdir(dir,{recursive:true,mode:0o700});
+   // Some authenticated CONNECT proxies stall Chromium HTTP/2; retain normal TLS validation.
    const factory=this.launch||((path,options)=>import("playwright-core").then(m=>m.chromium.launchPersistentContext(path,options)));
-   try{this.context=await factory(dir,{env:safeEnvironment(),...browserProxy(),executablePath:await this.executable(),headless:true,viewport:{width:1280,height:800},locale:"zh-CN",timezoneId:"Asia/Shanghai",acceptDownloads:false,chromiumSandbox:process.env.BROWSER_SANDBOX!=="false"});}catch{this.phase="failed";throw new AppError(503,"浏览器无法启动，请检查系统运行依赖与沙盒设置","browser_launch_failed");}
+   try{this.context=await factory(dir,{env:safeEnvironment(),...browserProxy(),executablePath:await this.executable(),headless:true,...(proxySettingForBrowser()?{args:["--disable-http2"]}:{}),viewport:{width:1280,height:800},locale:"zh-CN",timezoneId:"Asia/Shanghai",acceptDownloads:false,chromiumSandbox:process.env.BROWSER_SANDBOX!=="false"});}catch{this.phase="failed";throw new AppError(503,"浏览器无法启动，请检查系统运行依赖与沙盒设置","browser_launch_failed");}
    this.profile=profile;this.phase="ready";this.timer=setTimeout(()=>{if(!this.users)this.stop().catch(()=>{});},this.idleMs);this.timer.unref?.();const context=this.context;context.on?.("close",()=>{if(this.context===context){this.context=null;this.profile=null;this.phase="idle";}});
   })().finally(()=>{this.starting=null;});await this.starting;}
   if(signal?.aborted)throw new AppError(499,"请求已取消","cancelled");this.users++;let released=false;
@@ -41,7 +42,8 @@ export class GoogleBrowser {
 }
 
 function safeEnvironment(){const keys=["PATH","SystemRoot","WINDIR","USERPROFILE","LOCALAPPDATA","HOMEDRIVE","HOMEPATH","HOME","TMP","TEMP","TMPDIR","SSL_CERT_FILE","HTTP_PROXY","HTTPS_PROXY","ALL_PROXY","NO_PROXY"];return Object.fromEntries(keys.filter(k=>process.env[k]).map(k=>[k,process.env[k]]));}
-function browserProxy(){const value=process.env.HTTPS_PROXY||process.env.HTTP_PROXY||process.env.ALL_PROXY;if(!value)return{};try{const url=new URL(value);if(!["http:","https:","socks5:"].includes(url.protocol))return{};const username=decodeURIComponent(url.username),password=decodeURIComponent(url.password);url.username="";url.password="";return{proxy:{server:url.origin==="null"?url.protocol+"//"+url.host:url.origin,...(username?{username,password}:{})}};}catch{return{};}}
+function proxySettingForBrowser(){return process.env.HTTPS_PROXY||process.env.HTTP_PROXY||process.env.ALL_PROXY;}
+function browserProxy(){const value=proxySettingForBrowser();if(!value)return{};try{const url=new URL(value);if(!["http:","https:","socks5:"].includes(url.protocol))return{};const username=decodeURIComponent(url.username),password=decodeURIComponent(url.password);url.username="";url.password="";return{proxy:{server:url.origin==="null"?url.protocol+"//"+url.host:url.origin,...(username?{username,password}:{})}};}catch{return{};}}
 
 // At most two Chromium profiles by default. Requests for one profile share a context,
 // while each generation has its own page and request binding.

@@ -26,7 +26,17 @@ export class BrowserEngine {
   const previous=await this.accounts.get(profile).catch(()=>null);let verified=false;await this.browser.checkpoint?.(profile);
   const lease=await this.browser.acquire(profile,signal),context=lease.context,page=await context.newPage();const job={page,context,id};this.jobs.set(id,job);let models=[];const detach=this.captureCatalog(page,value=>{models=value;});const abort=()=>page.close().catch(()=>{});signal?.addEventListener("abort",abort,{once:true});
   try{
-   await page.goto("https://aistudio.google.com/prompts/new_chat",{waitUntil:"domcontentloaded",timeout:60000});const until=Date.now()+10*60000;
+   yield{browser_meta:{type:"status",status:"starting"},native_job:id};
+   yield{browser_meta:{type:"frame",context:id,width:1280,height:800},native_job:id};yield{browser_binary:(await page.screenshot({type:"jpeg",quality:65,timeout:10000})).toString("base64"),native_job:id};
+   try{await page.goto("https://aistudio.google.com/prompts/new_chat",{waitUntil:"commit",timeout:45000});}catch(error){
+    // ASVS V16.5: expose an actionable class, never raw navigation URLs or credentials.
+    if(signal?.aborted)throw cancelled();
+    const network=String(error.message||"").match(/net::ERR_[A-Z_]+/)?.[0]||"";
+    if(error.name==="TimeoutError")throw new AppError(504,"连接 Google 登录页超时，请检查 NAS 代理能否访问 accounts.google.com 和 aistudio.google.com","google_page_timeout");
+    if(/PROXY|TUNNEL/.test(network))throw new AppError(502,"Google 登录代理连接失败，请检查代理地址和认证配置","google_proxy_failed");
+    if(/CERT|SSL/.test(network))throw new AppError(502,"Google 登录连接的 TLS 证书校验失败","google_tls_failed");
+    throw new AppError(502,"Google 登录页连接失败，请检查 NAS 出口网络","google_page_failed");
+   }const until=Date.now()+10*60000;
    while(Date.now()<until){if(signal?.aborted)throw cancelled();
     const url=new URL(page.url());if(url.hostname==="aistudio.google.com"&&url.pathname.includes("available-regions"))throw new AppError(403,"Google 不支持当前出口地区或账号","region_or_account_unsupported");
     const email=url.hostname==="aistudio.google.com"?await this.email(page):"";

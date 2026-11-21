@@ -20,7 +20,7 @@ export class BackendAccounts {
           const task=result.tasks?.find(t=>t.id===job.remoteId);if(!task)throw new AppError(502,"后端登录任务已丢失","backend_login_failed");
           job.items=(task.items||[]).map(i=>({label:i.label||"",state:i.state,step:i.step||""}));
           if(task.state==="done"){job.state="done";return;}
-          if(task.state==="failed")throw new AppError(400,"Google 登录或 AI Studio 验证未通过，请重试","backend_login_failed");
+          if(task.state==="failed")throw new AppError(task.error?.status||400,task.error?.message||"Google 登录或 AI Studio 验证未通过，请重试",task.error?.code||"backend_login_failed");
           await sleep(1000,signal);
         }
         throw new AppError(408,"Google 登录超过十分钟，请重新开始","backend_login_timeout");

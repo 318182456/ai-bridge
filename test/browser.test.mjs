@@ -56,10 +56,19 @@ test("failed Google reauthorization preserves the last verified account metadata
  const root=await mkdtemp(join(tmpdir(),'ai-bridge-relogin-')),accounts=new GoogleAccounts(root),id='g_'+'4'.repeat(24);
  const old={id,email:'synthetic@example.invalid',enabled:true,state:'ready',checked_at:'2026-01-01T00:00:00.000Z',models:[{id:'old-model'}],grants:{aist:'verified',agy:'verified',robin:'verified'}};
  await accounts.put(structuredClone(old));let releases=0,closes=0;
- const page={goto:async()=>{},url:()=> 'https://aistudio.google.com/prompts/new_chat',locator:()=>({isVisible:async()=>true}),close:async()=>{closes++;}};
+ const page={screenshot:async()=>Buffer.from('synthetic-frame'),goto:async()=>{},url:()=> 'https://aistudio.google.com/prompts/new_chat',locator:()=>({isVisible:async()=>true}),close:async()=>{closes++;}};
  const engine=new BrowserEngine({accounts,browser:{checkpoint:async()=>{},acquire:async()=>({context:{newPage:async()=>page},release:()=>releases++})}});
  engine.email=async()=>old.email;engine.captureCatalog=(_page,receive)=>{receive([{id:'new-flash',capabilities:[1]}]);return()=>{};};
  engine.generate=async function*(){throw new AppError(503,'Synthetic network failure','network_error');};
  try{await assert.rejects(async()=>{for await(const _ of engine.login('synthetic-job',{account_id:id},new AbortController().signal)){};},{code:'network_error'});assert.deepEqual(await accounts.get(id),old);assert.equal(releases,1);assert.equal(closes,1);}
  finally{await rm(root,{recursive:true,force:true});}
+});
+
+
+test("Google login emits a real frame before navigation and returns a safe network error",async()=>{
+ const {BrowserEngine}=await import('../src/backends/browser-engine.mjs');const root=await mkdtemp(join(tmpdir(),'ai-bridge-first-frame-')),accounts=new GoogleAccounts(root);let navigated=false,released=false;
+ const page={screenshot:async()=>Buffer.from('synthetic-frame'),goto:async(_url,opts)=>{assert.equal(opts.waitUntil,'commit');navigated=true;const error=new Error('synthetic-private-navigation-url');error.name='TimeoutError';throw error;},close:async()=>{}};
+ const engine=new BrowserEngine({accounts,browser:{acquire:async()=>({context:{newPage:async()=>page},release:()=>{released=true;}})}});engine.captureCatalog=()=>()=>{};const iterator=engine.login('test',{},new AbortController().signal);
+ try{await iterator.next();await iterator.next();await iterator.next();const image=await iterator.next();assert.equal(navigated,false);assert.equal(Buffer.from(image.value.browser_binary,'base64').toString(),'synthetic-frame');await assert.rejects(iterator.next(),e=>e.code==='google_page_timeout'&&!e.message.includes('synthetic-private'));assert.equal(released,true);}
+ finally{await iterator.return();await rm(root,{recursive:true,force:true});}
 });
