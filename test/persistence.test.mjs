@@ -30,7 +30,10 @@ test('PostgreSQL persists normalized state and snapshots across restart, guards 
   await store.event({id:'event-one',status:400,code:'synthetic_error'});await db.putDocument('google-grant/g_test',{synthetic_refresh:'synthetic-value'});
   await assert.rejects(new Postgres(url).open(),{code:'storage_already_open'});const failed={...structuredClone(store.state),accounts:[...store.state.accounts,{name:'invalid-no-id'}]};await assert.rejects(db.saveState(failed),{code:'storage_unavailable'});
   await db.close();db=await new Postgres(url).open();const reopened=await new Store(root,db).init();assert.equal(reopened.state.accounts.length,1);assert.equal(reopened.state.accounts[0].id,a.id);assert.equal(reopened.state.keys.length,1);assert.equal(reopened.state.events.length,1);assert.equal((await db.document('google-grant/g_test')).synthetic_refresh,'synthetic-value');
-  const backup=Buffer.from('synthetic-encrypted-archive');await db.putProfile('agy',a.id,backup,{critical:[]});assert.deepEqual((await db.profile('agy',a.id)).archive,backup);
+  const vault=new AuthVault(db,root),home=vault.path('agy',a.id);await mkdir(home,{recursive:true});await writeFile(join(home,'settings.json'),'synthetic-profile');vault.mark('agy',a.id);assert.equal(await vault.capture('agy',a.id,{strict:true}),true);await vault.close();
+  await db.close();db=await new Postgres(url).open();await db.loadState();await rm(home,{recursive:true});const restored=new AuthVault(db,root);assert.equal(await restored.restore('agy',a.id),true);assert.equal(await readFile(join(home,'settings.json'),'utf8'),'synthetic-profile');await restored.close();
+  // Use the current storage after restart for the deletion check.
+  reopened.storage=db;
   reopened.state.events=[];await reopened.save();assert.equal((await db.query('SELECT count(*)::int AS count FROM ai_bridge.request_events')).rows[0].count,0);
  }finally{await db.close();await rm(root,{recursive:true,force:true});}
 });
