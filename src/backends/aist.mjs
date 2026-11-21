@@ -1,3 +1,4 @@
+import {backendEnabled} from './account-state.mjs';
 import {randomUUID} from "node:crypto";
 import {BrowserEngine} from "./browser-engine.mjs";
 import {AppError} from "../common.mjs";
@@ -5,7 +6,7 @@ import {toStudioRequest,StudioChat} from "./aist-protocol.mjs";
 export class AIStudio {
  constructor({dataDir,logger,engine}={}){this.engine=engine||new BrowserEngine({root:dataDir,logger});this.logger=logger;this.tasks=new Map();this.active=0;}
  status(){return{id:"aist",state:this.active?"ready":"managed",active_requests:this.active,resident_processes:0};}
- async catalogEntries(){return(await this.engine.accounts?.list()||[]).flatMap(a=>(a.models||[]).map(model=>({model,account:{id:a.id,name:a.email},available:a.enabled&&["verified","authenticated","synced"].includes(a.grants?.aist),checked_at:a.checked_at})));}
+ async catalogEntries(){return(await this.engine.accounts?.list()||[]).flatMap(a=>(a.models||[]).map(model=>({model,account:{id:a.id,name:a.email},available:backendEnabled(a,"aist")&&["verified","authenticated","synced"].includes(a.grants?.aist),checked_at:a.checked_at})));}
  async recordUsage(id,success,tokens){await this.engine.accounts?.recordUsage(id,"aist",success,tokens);}
  async result(op,input,signal){let result={};for await(const event of this.engine.run(op,input,signal))if(event.result)result=event.result;return result;}
  async selectAccount(input){return this.engine.selectAccount?this.engine.selectAccount(input):input.account_id||null;}
@@ -36,7 +37,7 @@ export class AIStudio {
    return{task:{id:task.id,view:task.view,state:task.state,items:task.items}};
   }
   if(method==="DELETE"&&path.startsWith("/api/accounts/tasks/")){const id=decodeURIComponent(path.split("/").at(-1));const task=this.tasks.get(id);task?.controller.abort();await task?.work;return{};}
-  if(method==="PUT"&&/^\/api\/accounts\/[^/]+$/.test(path))return this.result("set_enabled",{id:decodeURIComponent(path.split("/").at(-1)),enabled:input.enabled},signal);
+  if(method==="PUT"&&/^\/api\/accounts\/[^/]+$/.test(path))return this.result("set_enabled",{id:decodeURIComponent(path.split("/").at(-1)),enabled:input.enabled,backend:input.backend},signal);
   throw new AppError(400,"不支持此 AI Studio 操作");
  }
  async loginSocket(view){const task=[...this.tasks.values()].find(t=>t.view===view&&t.state==="running");if(!task)throw new AppError(404,"登录窗口已结束");return{attach:socket=>{task.clients.add(socket);if(task.lastStatus)socket.send(JSON.stringify(task.lastStatus));if(task.lastMeta)socket.send(JSON.stringify(task.lastMeta));if(task.frameMeta&&task.lastFrame){socket.send(JSON.stringify(task.frameMeta));socket.send(task.lastFrame,{binary:true});}socket.on("message",(data,binary)=>{if(binary||!task.nativeId)return;let value;try{value=JSON.parse(data.toString());}catch{return;}if(["pointer","wheel","key","text","dialog","viewport","confirm","skip"].includes(value.type))this.engine.input(task.nativeId,value);});socket.once("close",()=>task.clients.delete(socket));},release:()=>{}};}

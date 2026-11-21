@@ -9,7 +9,7 @@ export function mountBrowserSync(ctx,{onChange=async()=>{},onOpen=()=>{}}={}){
   try{const job=await ctx.api('/api/browser-sync');if(disposed)return false;show();onOpen(job.account_id);const running=['waiting_browser','queued','running'].includes(job.state);$('browserSyncStatus').textContent=({waiting_browser:'已打开本机 Google 页面。完成登录后，在脚本面板点击“登录完成，安全同步”。',queued:'凭据已收到，等待账号空闲后保存。',running:job.target==='robin'?'正在交换 Robin 授权凭据，不进行模型测试…':'正在保存 AIST Cookie，不启动 NAS 浏览器或模型测试…',done:'凭据已同步保存，未执行模型测试；首次实际调用时验证可用性。',failed:job.error||'同步未完成；原有授权已保留。',cancelled:'本机登录已取消。',expired:'配对已过期，请重新点击本机登录。'})[job.state]||'等待同步';
    $('browserSyncTitle').textContent='本机浏览器登录 · '+(job.target==='robin'?'Robin':'AIST');$('browserSyncExpiry').textContent='配对有效期至 '+fmtDate(job.expires_at)+'（北京时间）';$('browserSyncOpen').href=job.google_url;$('browserSyncOpen').hidden=job.state!=='waiting_browser';$('browserSyncCancel').hidden=!running;
    if(!running){clearInterval(timer);if(lastTerminal!==job.id){lastTerminal=job.id;await onChange();onOpen(job.account_id);}}return running;
-  }catch(error){if(error.status!==404)note('browserSyncStatus',error.message,true);return false;}finally{loading=false;}
+  }catch(error){if(error.status===404)clearInterval(timer);else note('browserSyncStatus',error.message,true);return false;}finally{loading=false;}
  }
  async function begin(account,target,email){
   if(starting)return;

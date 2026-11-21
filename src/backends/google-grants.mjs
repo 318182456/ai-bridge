@@ -18,7 +18,7 @@ export class GoogleGrants {
   if(!values.Token)throw new AppError(401,"Google 未授予 Robin 访问权限","robin_authorization_failed");
   // Bind the returned Google subject to the selected account; never silently relabel another identity.
   if(typeof values.Email!=="string"||values.Email.toLowerCase()!==account.email.toLowerCase())throw new AppError(409,"Google 授权身份与所选账号不一致，请选择该账号重新授权","account_identity_mismatch");
-  old.robin={email:account.email,android_id:androidId,master_token:values.Token};await this.save(account.id,old);return this.robinToken(account.id,signal);
+  old.robin={email:account.email,android_id:androidId,master_token:values.Token};await this.save(account.id,old);return{bound:true};
  }
  async robinToken(id,signal){
   if(this.pending.has(id))return this.pending.get(id);
@@ -30,8 +30,8 @@ export class GoogleGrants {
 }
 function authForm(values,{signal}={}){
  const body=new URLSearchParams(values).toString();const agent=proxySetting()?new https.Agent({keepAlive:false}):false;if(agent)agent.createConnection=(_options,done)=>{connectTLS("android.clients.google.com",443,{signal}).then(socket=>done(null,socket),done);};return new Promise((resolve,reject)=>{
-  const req=https.request({hostname:"android.clients.google.com",path:"/auth",method:"POST",agent,headers:{"content-type":"application/x-www-form-urlencoded","content-length":Buffer.byteLength(body),"user-agent":"GoogleAuth/1.4"},signal,timeout:20000},response=>{
-   let size=0;const chunks=[];response.on("data",b=>{size+=b.length;if(size>65536)response.destroy();else chunks.push(b);});response.once("error",()=>reject(new AppError(502,"Google 授权响应中断","google_auth_failed")));response.once("end",()=>{try{resolve(authResponse(response.statusCode,Buffer.concat(chunks).toString("utf8")));}catch(error){reject(error);}});
+  const req=https.request({hostname:"android.clients.google.com",path:"/auth",method:"POST",agent,headers:{"accept-encoding":"identity","content-type":"application/x-www-form-urlencoded","content-length":Buffer.byteLength(body),"user-agent":"GoogleAuth/1.4"},signal,timeout:20000},response=>{
+   let size=0;const chunks=[];response.on("data",b=>{size+=b.length;if(size>65536)response.destroy();else chunks.push(b);});response.once("error",()=>reject(new AppError(502,"Google 授权响应中断","google_auth_failed")));response.once("end",()=>{try{resolve(authResponse(response.statusCode,Buffer.concat(chunks).toString("utf8"),{phase:values.Token?"master":"access"}));}catch(error){reject(error);}});
   });req.once("timeout",()=>req.destroy());req.once("error",()=>reject(new AppError(signal?.aborted?499:502,signal?.aborted?"授权已取消":"Google 授权连接失败",signal?.aborted?"cancelled":"google_auth_failed")));req.once("close",()=>agent&&agent.destroy());req.end(body);
  });
 }

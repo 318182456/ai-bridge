@@ -1,3 +1,4 @@
+import {backendEnabled} from './account-state.mjs';
 import {randomUUID} from 'node:crypto';
 import {AppError} from '../common.mjs';
 import {googleCookies} from './browser-cookie-import.mjs';
@@ -14,6 +15,7 @@ export async function syncBrowserCredential({accounts,grants},input,signal){
   else{await grants.bindRobin(account,input.oauth_token,signal);account.grants.robin='authenticated';}
   saved=true;if(signal?.aborted)throw new AppError(499,'同步已取消','cancelled');
   if(!old||!Object.values(old.grants||{}).includes('verified'))account.enabled=true;
+  if(old?.backend_enabled){account.backend_enabled={aist:backendEnabled(old,'aist'),robin:backendEnabled(old,'robin')};account.enabled=Object.values(account.backend_enabled).some(Boolean);}
   account.synced_at=new Date().toISOString();account.state=Object.values(account.grants).includes('verified')?'ready':'authenticated';await accounts.put(account);
  }catch(error){await grants.save(account.id,before);if(old&&saved)await accounts.put(old);throw error;}
  finally{input.cookies=null;input.oauth_token='';}

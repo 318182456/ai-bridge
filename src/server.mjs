@@ -1,3 +1,5 @@
+import {registerGoogleAccounts} from './admin/google-accounts.mjs';
+import {backendEnabled} from './backends/account-state.mjs';
 import {syncBrowserCredential} from './backends/browser-credential-sync.mjs';
 import {BrowserSync,registerBrowserSync} from "./admin/browser-sync.mjs";
 import {browserSyncScript} from "./admin/browser-sync-script.mjs";
@@ -199,6 +201,7 @@ export async function createApplication(options = {}) {
   registerBackends({register,send,backends});
   registerBackendAccounts({register,send,body,backends,accounts:backendAccounts,owner:sessionOwner});
   registerBrowserSync({register,send,body,auth,sync:browserSync,script:browserSyncScript});
+  registerGoogleAccounts({register,send,body,accounts:googleAccounts,store,queue,sync:browserSync,browser:backends.get("aist").engine?.browser||{}});
   const aistChat=registerAIStudio({register,body,send,backends,queue,store,logger});
   const robinChat=registerAIStudio({register,body,send,backends,queue,store,logger},"robin");
   registerTasks({register,send,tasks,owner:sessionOwner});
@@ -424,8 +427,8 @@ export async function createApplication(options = {}) {
   async function refreshCredentialCatalog(signal){
     const accounts=await googleAccounts.list();
     for(const account of accounts){if(!account.enabled)continue;
-      const aist=account.cookie_revision&&(account.grants?.aist==="synced"||!account.models?.length);
-      const robin=account.grants?.robin==="authenticated"&&!account.robin_models?.length;
+      const aist=backendEnabled(account,"aist")&&account.cookie_revision&&(account.grants?.aist==="synced"||!account.models?.length);
+      const robin=backendEnabled(account,"robin")&&account.grants?.robin==="authenticated"&&!account.robin_models?.length;
       if(!aist&&!robin)continue;
       try{await queue.add(async jobSignal=>{if(aist)await backends.get("aist").engine.prepareAccount(account,jobSignal);if(robin)await backends.get("robin").modes(account,jobSignal);},signal,{key:account.id,cancelable:true,metadata:{kind:"models",account_id:account.id,summary:"读取同步账号模型目录（无生成）"}});}catch(error){logger.warn("backend.catalog_failed",{stage:aist?"aist":"robin",status:error.status||503,code:error.code||"backend_models_failed"});}
     }

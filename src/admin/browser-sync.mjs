@@ -28,6 +28,7 @@ export class BrowserSync{
   job.work=this.queue.add(async signal=>{if(!this.active(job)||Date.now()>job.expiresAt)throw new AppError(401,'管理会话或同步授权已失效');job.state='running';await this.process({target:job.target,account_id:job.account,expected_email:job.label,owner:job.owner,...payload},signal,value=>{job.step=value;});job.state='done';},job.controller.signal,{id:job.id,key:job.account,lane:'login',cancelable:true,metadata:{kind:'login',account_name:job.label,summary:'本机浏览器登录 · '+job.target}}).catch(error=>{job.state=error.code==='cancelled'?'cancelled':'failed';job.error=error instanceof AppError?error.message:'本机凭据同步保存失败';this.logger?.warn('browser_sync.failed',{stage:job.target,code:error.code||'browser_sync_failed',status:error.status||503});}).finally(()=>{payload.cookies=null;payload.oauth_token=null;});return{accepted:true};
  }
  cancel(owner){const job=[...this.jobs.values()].findLast(j=>j.owner===owner);if(!job)throw missing();job.secret=null;job.controller.abort();if(job.state==='waiting_browser')job.state='cancelled';return{cancelled:true};}
+ closeAccount(account){for(const [id,j]of this.jobs)if(j.account===account){j.secret=null;j.controller.abort();this.jobs.delete(id);}}
  closeOwner(owner){for(const j of this.jobs.values())if(j.owner===owner){j.secret=null;j.controller.abort();if(j.state==='waiting_browser')j.state='cancelled';}}
  async close(){for(const j of this.jobs.values()){j.secret=null;j.controller.abort();}await Promise.allSettled([...this.jobs.values()].map(j=>j.work));}
 }

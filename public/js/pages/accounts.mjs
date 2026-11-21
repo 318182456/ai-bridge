@@ -92,7 +92,8 @@ function renderAccounts() {
     quota5.id="quota5-"+a.id;quotaWeek.id="quotaWeek-"+a.id;
     const channels=text("td");
     if(a.native)channels.append(text("small","agy · "+(names[a.status]||a.status),a.native.enabled?"status-ready":"muted"));
-    if(a.google)for(const id of ["aist","robin"]){const grant=a.google.grants?.[id]||"not_authorized";const label=({verified:a.google.enabled?"已启用":"已验证 · 停用",authenticated:"已授权 · 待首次调用",synced:"Cookie 已同步 · 待首次调用",not_authorized:"未授权",needs_attention:"需处理"})[grant]||grant;channels.append(text("small",id+" · "+label,grant==="verified"&&a.google.enabled?"status-ready":"muted"));}
+    if(a.google&&!a.native)channels.append(text("small","agy · 未关联 / 未登录","muted"));
+    if(a.google)for(const id of ["aist","robin"]){const grant=a.google.grants?.[id]||"not_authorized";const enabled=a.google.backend_enabled?.[id]??a.google.enabled;const label=({verified:enabled?"已启用":"已验证 · 停用",authenticated:"已授权 · 待首次调用",synced:"Cookie 已同步 · 待首次调用",not_authorized:"未授权",needs_attention:"需处理"})[grant]||grant;channels.append(text("small",id+" · "+label+(enabled||!["synced","authenticated"].includes(grant)?"":" · 停用"),grant==="verified"&&enabled?"status-ready":"muted"));}
     row.append(selectCell,identity,channels,quota5,quotaWeek,
       text("td",count(a.requests)+" / "+count(a.successes)+" / "+count(a.failures)),text("td",a.token_reports?count(a.total_tokens):"未报告"));
     const ops = document.createElement("td"),
@@ -105,16 +106,20 @@ function renderAccounts() {
           const target = feedbackRow(a.id, "操作失败");
           target.append(text("p", e.message, "status-error"));
         });
-      const primary=label==="刷新额度"||label==="本机登录 AIST"||label==="本机登录 Robin"||(!a.google&&(label==="启用 agy"||label==="停用 agy"||(label==="登录 agy"&&!a.checked_at)));
+      const primary=label==="登录 agy"||label==="刷新额度"||label==="本机登录 AIST"||label==="本机登录 Robin"||(!a.google&&(label==="启用 agy"||label==="停用 agy"||(label==="登录 agy"&&!a.checked_at)));
       (primary?bar:more).append(b);
-      if(["starting","running","submitted","checking"].includes(loginStates.get(a.id))&&label!=="登录 agy")b.disabled=true;
+      if(["starting","running","submitted","checking"].includes(loginStates.get(a.id))&&label!=="登录 agy")b.disabled=true;return b;
     };
     if(a.google){
       button("本机登录 AIST",()=>localLogin.begin(a.google.id,"aist"));
       button("本机登录 Robin",()=>localLogin.begin(a.google.id,"robin"));
       button("NAS 授权 AIST",()=>googleLogin.begin(a.google.id,"aist"));
       button("NAS 授权 Robin",()=>googleLogin.begin(a.google.id,"robin"));
-      button(a.google.enabled?"停用 AI Studio / Robin":"启用 AI Studio / Robin",async()=>{await api("/api/backends/aist/accounts/"+a.google.id,{method:"PATCH",data:{enabled:!a.google.enabled}});await refresh();});
+      for(const [id,label]of [["aist","AIST"],["robin","Robin"]]){const enabled=a.google.backend_enabled?.[id]??a.google.enabled,authorized=["verified","authenticated",...(id==="aist"?["synced"]:[])].includes(a.google.grants?.[id]);const toggle=button((enabled&&authorized?"停用 ":"启用 ")+label,async()=>{await api("/api/backends/aist/accounts/"+a.google.id,{method:"PATCH",data:{backend:id,enabled:!enabled}});await refresh();});if(!authorized){toggle.disabled=true;toggle.title="请先完成此后端的凭据同步或授权";}}
+      if(!a.native)button("登录 agy",async()=>{
+        const cell=feedbackRow(a.id,"关联账号并登录官方 agy");cell.append(text("p","AIST / Robin Cookie 不能代替 agy 登录。请明确选择已有 agy 账号或新建，再完成官方 CLI 授权。","muted"));const choose=document.createElement("select");choose.setAttribute("aria-label","选择 agy 账号");choose.add(new Option("请选择已有账号或新建",""));choose.add(new Option("新建 agy 账号","new"));for(const native of state.accounts)choose.add(new Option(native.name+" · "+(native.status==="ready"?"已登录":"待登录"),native.id));const save=text("button","关联并登录 agy");save.disabled=true;choose.onchange=()=>save.disabled=!choose.value;save.onclick=async()=>{save.disabled=true;try{const r=await api("/api/backends/aist/accounts/"+a.google.id+"/agy",{method:"POST",data:choose.value==="new"?{create:true}:{native_account_id:choose.value}});await refresh();const native=state.accounts.find(n=>n.id===r.account_id);if(!native)throw Error("关联的 agy 账号已不存在，请重新选择");if(native.status==="ready"){feedbackRow(native.id,"agy 账号已登录").append(text("p","已关联选定的 agy 账号，可以直接使用；需要更换登录时点击登录 agy。","muted"));}else await showLogin(native);}catch(e){const target=directory().find(n=>n.google?.id===a.google.id)?.id||a.id;feedbackRow(target,"agy 登录未开始").append(text("p",e.message,"status-error"));}};cell.append(choose,save);
+      });
+      button("删除 Google 账号记录",async()=>{const cell=feedbackRow(a.id,"删除 Google 账号记录");cell.append(text("p","只移除本项目账号记录，已保存的登录资料与关联 agy 账号保留；不会删除 Google 官方账号。","muted"));const confirm=text("button","确认删除 Google 记录","secondary danger");confirm.onclick=async()=>{confirm.disabled=true;try{await api("/api/backends/aist/accounts/"+a.google.id,{method:"DELETE"});expanded.delete(a.id);await refresh();}catch(e){cell.append(text("p",e.message,"status-error"));confirm.disabled=false;}};cell.append(confirm);},true);
     }
     if(a.native){
     button("登录 agy",()=>showLogin(a));
