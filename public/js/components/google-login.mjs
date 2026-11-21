@@ -12,9 +12,9 @@ export function mountGoogleLogin(ctx,{onChange=async()=>{},onOpen=()=>{}}={}){
  $("googleZoomIn").onclick=()=>{zoom=Math.min(2,zoom+.25);applyZoom();};$("googleZoomFit").onclick=()=>{zoom=1;applyZoom();syncViewport();};
 
  function setPhase(value){const manual=["manual","manual_robin"].includes(value.status);$("confirmGoogleLogin").hidden=!manual;$("skipGoogleGrant").hidden=value.status!=="manual_robin";if(manualPhase!==value.status){$("confirmGoogleLogin").disabled=false;$("skipGoogleGrant").disabled=false;}manualPhase=value.status;setStatus(({manual:"请在完整浏览器中登录并进入 AI Studio，然后点击继续验证",manual_robin:"请完成 Robin 的 Google 授权，再继续验证；也可稍后处理",verifying:"已关闭手动浏览器，正在实际验证并保存账号",partial:value.message||"部分授权未完成，请查看账号状态"})[value.status]||({preparing:"准备完整浏览器，首次使用可能需要下载…",starting:"正在启动完整浏览器…",waiting:"请完成 Google 官方授权",saving:"正在验证并保存账号"})[value.status]||"正在登录");}
- $("confirmGoogleLogin").onclick=()=>{send({type:"confirm"});$("confirmGoogleLogin").disabled=true;};$("skipGoogleGrant").onclick=()=>{send({type:"skip"});$("skipGoogleGrant").disabled=true;};
+ $("confirmGoogleLogin").onclick=()=>{if(send({type:"confirm"}))$("confirmGoogleLogin").disabled=true;};$("skipGoogleGrant").onclick=()=>{if(send({type:"skip"}))$("skipGoogleGrant").disabled=true;};
  function closeSocket(){sequence++;socket?.close();socket=null;view=null;frame=null;touch=null;$("googleBrowser").hidden=true;$("googleConnectPlaceholder").hidden=false;const canvas=$("googleCanvas");canvas.getContext("2d").clearRect(0,0,canvas.width,canvas.height);$("googleKeyboard").value="";}
- function send(message){if(socket?.readyState===WebSocket.OPEN&&frame)socket.send(JSON.stringify({...message,context:frame.context}));}
+ function send(message){if(socket?.readyState!==WebSocket.OPEN||!frame)return false;socket.send(JSON.stringify({...message,context:frame.context}));return true;}
  function connect(id){
    if(view===id&&socket&&socket.readyState<=1)return;closeSocket();view=id;
    const url=new URL("/api/backends/aist/login-view/"+id,location.origin);url.protocol=location.protocol==="https:"?"wss:":"ws:";
