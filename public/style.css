@@ -143,3 +143,8 @@ html,body{height:100%;overflow:hidden}.app-layout{height:100dvh;min-height:0}.ma
  input:not([type=checkbox]),select,textarea{font-size:16px}
  .endpoint-row{gap:10px}.endpoint-row>.button,.endpoint-row>button{flex-shrink:0}
 }
+
+.login-card{flex-shrink:1;min-height:0}
+@media(max-width:780px) and (max-height:500px){
+ #main{padding:10px 16px}.page-heading{margin-bottom:10px}.page-heading p{display:none}.page-heading h1{font-size:18px}.page-footer{display:none}.login-card{padding:16px}
+}
