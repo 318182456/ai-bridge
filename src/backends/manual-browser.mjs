@@ -2,7 +2,7 @@ import {spawn} from "node:child_process";
 import {mkdtemp,mkdir,rm,open,access} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join,resolve} from "node:path";
-import {randomBytes} from "node:crypto";
+import {randomBytes,createHash} from "node:crypto";
 import {setTimeout as sleep} from "node:timers/promises";
 import {manualProxy,googleHost} from "./manual-proxy.mjs";
 import {proxySetting} from "../runtime/tls-tunnel.mjs";
@@ -36,15 +36,17 @@ export class ManualBrowser{
  }
  assertActive(){if(this.cancelled||this.signal?.aborted)throw new AppError(499,"登录已取消","cancelled");if(this.closed||this.chrome?.stopped||this.chrome?.failed||this.xvfb?.stopped||this.xvfb?.failed)throw new AppError(503,"完整浏览器已关闭，请重新开始登录","manual_browser_closed");}
  async resize({width,height}){this.size={width:Math.max(640,Math.min(1600,Math.floor(width))),height:Math.max(480,Math.min(1000,Math.floor(height)))};if(this.window){await this.command("xdotool",["windowsize",this.window,String(this.size.width),String(this.size.height)]);await this.command("xdotool",["windowmove",this.window,"0","0"]);}}
- async capture(){this.assertActive();const dump=await this.command("xwd",["-root","-silent","-display",this.display],{max:16*1024*1024,timeout:5000});return xwdPng(dump,this.size);}
+ async capture(){this.assertActive();const dump=await this.command("xwd",["-root","-silent","-display",this.display],{max:16*1024*1024,timeout:5000});const hash=createHash("sha256").update(dump).update(JSON.stringify(this.size)).digest("hex");if(hash===this.frameHash&&this.frame)return this.frame;this.frameHash=hash;return this.frame=xwdPng(dump,this.size);}
  async paste(text){
+  // ASVS V1.2.5: printable ASCII goes through stdin, never command arguments or a shell.
+  if(/^[\x20-\x7e]+$/.test(text))return this.command("xdotool",["type","--clearmodifiers","--delay","0","--file","-"],{input:text});
   await this.stop(this.clipboard);const child=this.clipboard=spawn("xclip",["-quiet","-selection","clipboard","-in"],{env:this.env(),stdio:["pipe","ignore","ignore"],shell:false,windowsHide:true});child.on("error",()=>{child.failed=true;});child.once("exit",()=>{child.stopped=true;});child.stdin.on("error",()=>{});child.stdin.end(text);
   let ready=false;for(let i=0;i<20;i++){if(child.failed||child.stopped)throw failure("manual_input_failed");try{if((await this.command("xclip",["-selection","clipboard","-out"],{max:65536,timeout:1000})).toString()===text){ready=true;break;}}catch{}await sleep(50);}if(!ready)throw failure("manual_clipboard_timeout");
   // Keep the selection owner alive until the next paste/close; Chromium may consume it asynchronously.
   await this.command("xdotool",["key","--clearmodifiers","ctrl+v"]);await sleep(100);
  }
 
- input(value){const action=async()=>{this.assertActive();if(value.type==="confirm"){this.confirmed=true;return;}if(value.type==="viewport"&&Number.isInteger(value.width)&&Number.isInteger(value.height)&&value.width>=320&&value.width<=1920&&value.height>=240&&value.height<=1200)return this.resize(value);
+ input(value){this.lastInputAt=Date.now();const action=async()=>{this.assertActive();if(value.type==="confirm"){this.confirmed=true;return;}if(value.type==="viewport"&&Number.isInteger(value.width)&&Number.isInteger(value.height)&&value.width>=320&&value.width<=1920&&value.height>=240&&value.height<=1200)return this.resize(value);
    if(value.type==="text"&&typeof value.text==="string"&&value.text.length<=16384)return this.paste(value.text);
    if(value.type==="key"&&typeof value.key==="string"&&value.key.length<=30&&["down","up"].includes(value.action)){
     if(modifiers[value.key]){if(value.action==="down")this.held.add(modifiers[value.key]);else this.held.delete(modifiers[value.key]);return;}if(value.action!=="down")return;

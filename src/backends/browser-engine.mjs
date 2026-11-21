@@ -5,6 +5,7 @@ import {setTimeout as sleep} from "node:timers/promises";
 import {GoogleBrowserPool} from "./browser.mjs";
 import {GoogleAccounts} from "./google-store.mjs";
 import {binding,encodeRequest,decodeCatalog,decodeResponse,parse} from "./studio-wire.mjs";
+import {studioFailure} from "./studio-failure.mjs";
 import {AppError} from "../common.mjs";
 const cancelled=()=>new AppError(499,"请求已取消","cancelled");
 export class BrowserEngine {
@@ -25,8 +26,8 @@ export class BrowserEngine {
  captureCatalog(page,receive){const handler=async response=>{try{const u=new URL(response.url());if(u.protocol!=="https:"||!["alkalimakersuite-pa.clients6.google.com","alkalimakersuite-pa.googleapis.com"].includes(u.hostname)||!u.pathname.endsWith("/ListModels")||!response.ok())return;const text=await response.text();if(text.length>8*1024*1024)return;receive(decodeCatalog(text));}catch{}};page.on("response",handler);return()=>page.off("response",handler);}
  async *manualLogin(id,profile,url,signal,phase="manual"){
   await this.browser.runtime?.prepare();await this.vault?.restore("google",profile);const desktop=this.manualFactory({executable:await this.browser.runtime?.executable(),profile:join(this.root,"google/profiles",profile),url}),job={id,manual:desktop,phase};this.jobs.set(id,job);
-  try{yield{browser_meta:{type:"status",status:"starting"},native_job:id};await desktop.start(signal);yield{browser_meta:{type:"status",status:phase},native_job:id};const until=Date.now()+10*60000;
-   while(!desktop.confirmed){if(job.inputError)throw job.inputError;if(signal?.aborted)throw cancelled();if(Date.now()>until)throw new AppError(408,"完整浏览器登录超过十分钟","login_timeout");const image=await desktop.capture();yield{browser_meta:{type:"frame",context:id,width:image.width,height:image.height,min_width:640,min_height:480,desktop:true},native_job:id};yield{browser_binary:image.bytes.toString("base64"),native_job:id};await sleep(500,undefined,{signal});}
+  try{yield{browser_meta:{type:"status",status:"starting"},native_job:id};await desktop.start(signal);yield{browser_meta:{type:"status",status:phase},native_job:id};const until=Date.now()+10*60000;let lastFrame=null;
+   while(!desktop.confirmed){if(job.inputError)throw job.inputError;if(signal?.aborted)throw cancelled();if(Date.now()>until)throw new AppError(408,"完整浏览器登录超过十分钟","login_timeout");const image=await desktop.capture();if(image!==lastFrame){lastFrame=image;yield{browser_meta:{type:"frame",context:id,width:image.width,height:image.height,min_width:640,min_height:480,desktop:true},native_job:id};yield{browser_binary:image.bytes.toString("base64"),native_job:id};}await sleep(Date.now()-(desktop.lastInputAt||0)<1500?100:500,undefined,{signal});}
    return{skipped:!!desktop.skipped};
   }catch(error){if(signal?.aborted)throw cancelled();throw error;}finally{await desktop.close();this.jobs.delete(id);}
  }
@@ -84,7 +85,7 @@ export class BrowserEngine {
    const field=page.locator("ms-prompt-box textarea");await field.waitFor({state:"visible",timeout:30000});await field.fill(prompt,{timeout:15000});
    const responsePromise=page.waitForResponse(r=>r.request().method()==="POST"&&["alkalimakersuite-pa.clients6.google.com","alkalimakersuite-pa.googleapis.com"].includes(new URL(r.url()).hostname)&&new URL(r.url()).pathname.endsWith("/GenerateContent"),{timeout:180000});responsePromise.catch(()=>{});
    await page.locator("ms-run-button button").click({timeout:30000});const response=await responsePromise;
-   if(!replaced)throw new AppError(502,"未能绑定本次 aist 请求","studio_request_not_bound");if(!response.ok())throw new AppError(response.status(),"AI Studio 拒绝生成请求","studio_request_failed");const body=await response.text();if(body.length>16*1024*1024)throw new AppError(502,"AI Studio 响应超过限制");
+   if(!replaced)throw new AppError(502,"未能绑定本次 aist 请求","studio_request_not_bound");if(!response.ok())throw await studioFailure(response);const body=await response.text();if(body.length>16*1024*1024)throw new AppError(502,"AI Studio 响应超过限制");
    const events=decodeResponse(body);if(!request.auth_verification&&events.some(e=>e.kind==="text"||e.kind==="function_call"||e.kind==="media"))this.vault?.mark("google",account.id);for(const event of events)yield event;
   }catch(e){if(signal?.aborted)throw cancelled();if(e instanceof AppError)throw e;throw new AppError(502,"AI Studio 页面请求未完成","studio_browser_failed");}
   finally{signal?.removeEventListener("abort",abort);await page.close().catch(()=>{});lease.release();}
