@@ -39,6 +39,7 @@ export class AuthVault {
   // ASVS V1.2/V15: no links, runtime sockets or browser caches enter a credential snapshot.
   const stream=create({cwd:path,gzip:true,portable:true,noMtime:true,filter:(p,stat)=>{
    const clean=p.replace(/^\.\//,"");if(!safe(clean)||stat.isSymbolicLink()||!stat.isFile()&&!stat.isDirectory())return false;
+   if(kind==="agy"&&/^\.gemini\/antigravity-cli\/(?:bin|log|conversations|brain|implicit|cache|builtin|tmp)(?:\/|$)/.test(clean))return false;
    if(clean.split("/").some(part=>[".cache","Cache","Code Cache","GPUCache","Crashpad"].includes(part))||/Singleton(?:Lock|Cookie|Socket)$/.test(clean))return false;
    if(stat.isFile()&&/(?:keyring|unlock|settings\.json$|Cookies$|Local State$|Preferences$)/i.test(clean))critical.push(clean);return true;
   }},["."]);

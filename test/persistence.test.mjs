@@ -11,8 +11,9 @@ const mockStorage=()=>{const rows=new Map();return{rows,profile:async(k,id)=>row
 test('credential snapshots restore a missing keyring and retain last valid backup when sync fails',async()=>{
  const root=await mkdtemp(join(tmpdir(),'ai-bridge-vault-test-')),storage=mockStorage(),vault=new AuthVault(storage,root),id='a_'+'1'.repeat(16),home=vault.path('agy',id),key=join(home,'.local/share/keyrings/login.keyring');
  try{
-  await mkdir(join(home,'.local/share/keyrings'),{recursive:true});await writeFile(key,'synthetic-encrypted-keyring');await writeFile(join(home,'settings.json'),'synthetic-private-config');vault.mark('agy',id);assert.equal(await vault.capture('agy',id,{strict:true}),true);
+  await mkdir(join(home,'.local/share/keyrings'),{recursive:true});await writeFile(key,'synthetic-encrypted-keyring');await mkdir(join(home,'.gemini/antigravity-cli/log'),{recursive:true});await writeFile(join(home,'.gemini/antigravity-cli/log/trace'),'synthetic-runtime-log');await writeFile(join(home,'settings.json'),'synthetic-private-config');vault.mark('agy',id);assert.equal(await vault.capture('agy',id,{strict:true}),true);
   await rm(key);assert.equal(await vault.restore('agy',id),true);assert.equal(await readFile(key,'utf8'),'synthetic-encrypted-keyring');
+  const paths=await vault.validate(storage.rows.get('agy'+id).archive);assert.ok(!paths.some(p=>p.includes('/log/')));
   const before=storage.rows.get('agy'+id).checksum;storage.putProfile=async()=>{throw Error('synthetic unavailable database');};vault.mark('agy',id);await writeFile(key,'synthetic-new-keyring');assert.equal(await vault.capture('agy',id),false);assert.equal(storage.rows.get('agy'+id).checksum,before);assert.equal(vault.status().unsynced_profiles,1);assert.equal(await readFile(key,'utf8'),'synthetic-new-keyring');
   await assert.rejects(vault.restore('agy','../escape'),{status:400});
  }finally{await vault.close();await rm(root,{recursive:true,force:true});}

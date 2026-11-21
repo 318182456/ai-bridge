@@ -8,7 +8,7 @@ RUN CLI_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt node /tmp/install-cli.mjs &
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 LABEL org.opencontainers.image.title="AI Bridge" \
       org.opencontainers.image.source="https://github.com/318182456/ai-bridge" \
-      org.opencontainers.image.version="0.4.0-alpha.2"
+      org.opencontainers.image.version="0.4.0-alpha.3"
 WORKDIR /app
 COPY --chown=node:node package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
