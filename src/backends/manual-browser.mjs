@@ -32,7 +32,7 @@ export class ManualBrowser{
   this.args=["--user-data-dir="+this.profile,"--no-first-run","--no-default-browser-check","--disable-dev-shm-usage","--password-store=basic","--lang=zh-CN","--window-position=0,0","--window-size=1100,850",...(this.proxy?["--proxy-server="+this.proxy.server,"--disable-http2"]:[]),this.url];
   this.chrome=this.child(this.executable,this.args);
   for(let i=0;i<60;i++){this.assertActive();try{const ids=(await this.command("xdotool",["search","--onlyvisible","--pid",String(this.chrome.pid)],{timeout:1000})).toString().trim().split(/\s+/);if(ids[0]&&/^\d+$/.test(ids[0])){this.window=ids[0];break;}}catch{}await sleep(100);}
-  if(!this.window)throw failure();await this.resize(this.size);return this;
+  if(!this.window)throw failure();await this.resize(this.size);await this.command("xdotool",["windowfocus",this.window]);return this;
  }
  assertActive(){if(this.cancelled||this.signal?.aborted)throw new AppError(499,"登录已取消","cancelled");if(this.closed||this.chrome?.stopped||this.chrome?.failed||this.xvfb?.stopped||this.xvfb?.failed)throw new AppError(503,"完整浏览器已关闭，请重新开始登录","manual_browser_closed");}
  async resize({width,height}){this.size={width:Math.max(640,Math.min(1600,Math.floor(width))),height:Math.max(480,Math.min(1000,Math.floor(height)))};if(this.window){await this.command("xdotool",["windowsize",this.window,String(this.size.width),String(this.size.height)]);await this.command("xdotool",["windowmove",this.window,"0","0"]);}}
