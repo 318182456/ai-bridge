@@ -47,10 +47,10 @@ test("session cancellation, timeout, malformed results, duplicate results and re
     const task=runner.execute(aid,{sessionId:"abort",prompt:"HANG",signal:abort.signal});
     setTimeout(()=>abort.abort(),100);
     await assert.rejects(task,e=>e.code==="cancelled");
-    runner.timeout=100;
+    const savedTimeout=runner.timeout;runner.timeout=100;
     await assert.rejects(runner.execute(aid,{sessionId:"timeout",prompt:"HANG"}),e=>e.code==="timeout");
     assert.equal(runner.sessions.size,0);assert.equal(runner.activePids.size,0);
-    runner.outputLimit=1000;
+    runner.timeout=savedTimeout;runner.outputLimit=1000;
     await assert.rejects(runner.execute(aid,{sessionId:"overflow",prompt:"OVERFLOW"}),e=>e.code==="output_limit");
     assert.equal(runner.activePids.size,0);
   }));
