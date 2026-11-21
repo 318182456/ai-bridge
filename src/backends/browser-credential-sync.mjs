@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {AppError} from '../common.mjs';
 import {googleCookies} from './browser-cookie-import.mjs';
 // ASVS 2.2.2 / 16.5.3: private credential persistence is distinct from verified product access.
-export async function syncBrowserCredential({accounts,grants},input,signal){
+export async function syncBrowserCredential({accounts,grants,verify},input,signal,progress=()=>{}){
  let old;try{old=structuredClone(await accounts.get(input.account_id));}catch(e){if(e.status!==404)throw e;}
  const account=old?structuredClone(old):{id:input.account_id,email:input.expected_email,enabled:true,state:'authenticated',models:[],grants:{aist:'not_authorized',robin:'not_authorized',agy:'not_authorized'}};
  if(account.email.toLowerCase()!==input.expected_email.toLowerCase())throw new AppError(409,'所选 Google 身份不一致','account_identity_mismatch');
@@ -19,5 +19,6 @@ export async function syncBrowserCredential({accounts,grants},input,signal){
   account.synced_at=new Date().toISOString();account.state=Object.values(account.grants).includes('verified')?'ready':'authenticated';await accounts.put(account);
  }catch(error){await grants.save(account.id,before);if(old&&saved)await accounts.put(old);throw error;}
  finally{input.cookies=null;input.oauth_token='';}
+ if(verify)return{synced:true,...await verify(account.id,input.target,signal,progress)};
  return{synced:true,verified:false};
 }

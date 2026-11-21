@@ -9,17 +9,17 @@ import {AppError} from "../common.mjs";
 const cancelled=()=>new AppError(499,"请求已取消","cancelled");
 export class BrowserEngine {
  constructor({root,browser,accounts,logger,vault,credentialProvider}={}){this.credentialProvider=credentialProvider;this.preparingAccounts=new Map();this.appliedCookies=new WeakMap();this.identityMenus=new WeakSet();this.browser=browser||new GoogleBrowserPool({dataDir:root,logger,authVault:vault});this.accounts=accounts||new GoogleAccounts(root);this.cursor=0;this.vault=vault;}
- async prepareAccount(account,signal){
+ async prepareAccount(account,signal,{refresh=false}={}){
   if(!account.cookie_revision)return account;
   if(this.preparingAccounts.has(account.id)){await this.preparingAccounts.get(account.id);return this.accounts.get(account.id);}
-  const work=(async()=>{const cookie=await this.credentialProvider?.(account.id);if(!cookie||cookie.revision!==account.cookie_revision)throw new AppError(401,"同步 Cookie 不可用，请重新同步","google_cookies_missing");const lease=await this.browser.acquire(account.id,signal);const applied=this.appliedCookies.get(lease.context)===cookie.revision;lease.release();if(applied&&account.models?.length)return;
+  const work=(async()=>{const cookie=await this.credentialProvider?.(account.id);if(!cookie||cookie.revision!==account.cookie_revision)throw new AppError(401,"同步 Cookie 不可用，请重新同步","google_cookies_missing");const lease=await this.browser.acquire(account.id,signal);const applied=this.appliedCookies.get(lease.context)===cookie.revision;lease.release();if(applied&&account.models?.length&&!refresh)return;
    await this.prepareCookies(account,cookie,signal);
   })();this.preparingAccounts.set(account.id,work);try{await work;return await this.accounts.get(account.id);}finally{this.preparingAccounts.delete(account.id);}
  }
  async selectAccount(input){const accounts=(await this.accounts.list()).filter(a=>backendEnabled(a,"aist")&&["verified","authenticated","synced"].includes(a.grants?.aist)&&(!input.account_id||input.account_id===a.id)&&((a.models||[]).some(m=>m.id===input.model)||!!a.cookie_revision&&!a.models?.length));if(!accounts.length)throw new AppError(503,"没有支持此模型的已验证 AI Studio 账号","no_eligible_account");return accounts[input.account_id?0:this.cursor++%accounts.length].id;}
  async *run(op,input={},signal){
   if(signal?.aborted)throw cancelled();
-  if(op==="accounts"){yield{result:{accounts:(await this.accounts.list()).map(a=>({id:a.id,label:a.email,enabled:backendEnabled(a,"aist")||backendEnabled(a,"robin"),state:a.state,benefit_tier:a.tier||"未提供",models:a.models||[],grants:a.grants||{},backend_enabled:{aist:backendEnabled(a,"aist"),robin:backendEnabled(a,"robin")},agy_account_id:a.agy_account_id||null,usage:a.usage||{},checked_at:a.checked_at||null}))}};return;}
+  if(op==="accounts"){yield{result:{accounts:(await this.accounts.list()).map(a=>({id:a.id,label:a.email,enabled:backendEnabled(a,"aist")||backendEnabled(a,"robin"),state:a.state,benefit_tier:a.tier||"未提供",models:a.models||[],grants:a.grants||{},backend_enabled:{aist:backendEnabled(a,"aist"),robin:backendEnabled(a,"robin")},agy_account_id:a.agy_account_id||null,usage:a.usage||{},verification:a.verification||{},checked_at:a.checked_at||null}))}};return;}
   if(op==="set_enabled"){const a=await this.accounts.get(input.id);if(input.enabled&&a.state!=="ready"&&!Object.values(a.grants||{}).some(v=>["synced","authenticated"].includes(v)))throw new AppError(409,"请先完成实际生成验证");if(input.backend)setBackendEnabled(a,input.backend,input.enabled);else{a.enabled=!!input.enabled;a.backend_enabled={aist:a.enabled,robin:a.enabled};}await this.accounts.save();yield{result:{updated:true}};return;}
   if(op==="models"){const candidates=(await this.accounts.list()).filter(a=>backendEnabled(a,"aist")&&a.cookie_revision);for(const a of candidates)await this.prepareAccount(a,signal);const rows=(await this.accounts.list()).filter(a=>backendEnabled(a,"aist")&&["verified","authenticated","synced"].includes(a.grants?.aist)),all=new Map();for(const a of rows)for(const m of a.models||[])all.set(m.id,m);yield{result:{models:[...all.values()]}};return;}
   if(op==="generate"){const a=await this.accounts.get(await this.selectAccount(input));for await(const event of this.generate(a,input,signal))yield{event:{...event,account_id:a.id}};return;}
@@ -58,7 +58,7 @@ export class BrowserEngine {
      const current=await this.accounts.get(profile);
      if(current.cookie_revision!==credential.revision)throw new AppError(409,"Cookie 已更新，请重新执行本次请求","google_cookies_changed");
      const grants={...current.grants,aist:current.grants?.aist==="verified"?"verified":"authenticated"};
-     await this.accounts.put({...current,models,authuser,grants,state:Object.values(grants).includes("verified")?"ready":"authenticated"});
+     await this.accounts.put({...current,models,authuser,grants,catalog_updated_at:{...current.catalog_updated_at,aist:new Date().toISOString()},state:Object.values(grants).includes("verified")?"ready":"authenticated"});
      this.appliedCookies.set(lease.context,credential.revision);prepared=true;return;
     }
     await sleep(500,undefined,{signal});

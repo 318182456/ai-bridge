@@ -1,7 +1,6 @@
 export const $=id=>document.getElementById(id);
 let csrf="";
 export function setCsrf(value){csrf=value||"";}
-export function socketProtocols(){return ["ai-bridge","csrf."+csrf];}
 export function el(tag,value="",className=""){const node=document.createElement(tag);node.textContent=value;node.className=className;return node;}
 export function note(id,value,error=false){const node=typeof id==="string"?$(id):id;if(node){node.textContent=value;node.className="feedback"+(error?" error":"");}}
 export async function api(path,{method="GET",data,signal}={}){

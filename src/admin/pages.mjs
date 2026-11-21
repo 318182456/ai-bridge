@@ -39,6 +39,6 @@ export function registerPages({register,publicDir}){
   const assets=[["/style.css","style.css","text/css"],["/icon.svg","icon.svg","image/svg+xml"],["/icon-180.png","icon-180.png","image/png"],
     ["/js/core.mjs","js/core.mjs","text/javascript"],["/js/shell.mjs","js/shell.mjs","text/javascript"],
     ...Object.keys(pages).map(id=>["/js/pages/"+id+".mjs","js/pages/"+id+".mjs","text/javascript"])];
-  for(const name of ["browser-sync","account-directory","task-console","queue"])assets.push(["/js/components/"+name+".mjs","js/components/"+name+".mjs","text/javascript"]);
+  for(const name of ["model-catalog","browser-sync","account-directory","task-console","queue"])assets.push(["/js/components/"+name+".mjs","js/components/"+name+".mjs","text/javascript"]);
   for(const [path,file,type] of assets)register("GET",path,"public",async({res})=>{res.writeHead(200,{"content-type":type});res.end(await readFile(join(publicDir,file)));});
 }

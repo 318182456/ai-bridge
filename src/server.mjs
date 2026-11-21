@@ -6,6 +6,8 @@ import {browserSyncScript} from "./admin/browser-sync-script.mjs";
 import {Postgres} from "./storage/postgres.mjs";
 import {AuthVault} from "./storage/auth-vault.mjs";
 import {BrowserEngine} from "./backends/browser-engine.mjs";
+import {verifyGoogleAccount} from "./backends/account-verification.mjs";
+import {CatalogRefresh} from "./backends/catalog-refresh.mjs";
 import {modelCatalog,publicModels} from "./backends/catalog.mjs";
 import {GoogleGrants} from "./backends/google-grants.mjs";
 import {GoogleAccounts} from "./backends/google-store.mjs";
@@ -127,7 +129,7 @@ export async function createApplication(options = {}) {
   if(options.aistudio)backends.register("aist",options.aistudio);
   else backends.register("aist",new AIStudio({dataDir,logger,engine:new BrowserEngine({root:dataDir,logger,accounts:googleAccounts,vault:authVault,credentialProvider:async id=>(await googleGrants.read(id)).aist})}));
   backends.register("robin",options.robin||new Robin({dataDir,logger,accounts:googleAccounts,tokenProvider:id=>googleGrants.robinToken(id)}));
-  const browserSync=new BrowserSync({auth,accounts:googleAccounts,queue,logger,process:options.browserSyncProcess|| ((input,signal)=>syncBrowserCredential({accounts:googleAccounts,grants:googleGrants},input,signal))});
+  const browserSync=new BrowserSync({auth,accounts:googleAccounts,queue,logger,process:options.browserSyncProcess|| ((input,signal,progress)=>syncBrowserCredential({accounts:googleAccounts,grants:googleGrants,verify:(id,backend,signal,step)=>verifyGoogleAccount({accounts:googleAccounts,backends},id,backend,signal,step)},input,signal,progress))});
   backends.register("agy",{status:()=>({state:"managed",active_requests:queue.running}),close:async()=>{}});
   async function perform(params, signal, context={}) {
     const existing = params.session_id && params.session_id !== "new" ? sessions.get(params.session_id, context.owner) : null;
@@ -197,6 +199,7 @@ export async function createApplication(options = {}) {
   registerBackendAccounts({register,send,body,backends});
   registerBrowserSync({register,send,body,auth,sync:browserSync,script:browserSyncScript});
   registerGoogleAccounts({register,send,body,accounts:googleAccounts,store,queue,sync:browserSync,browser:backends.get("aist").engine?.browser||{}});
+  register("POST",/^\/api\/backends\/(aist|robin)\/accounts\/(g_[a-f0-9]{24})\/verify$/,"mutation",async({req,res,match,signal})=>{const input=await body(req);if(!input||typeof input!=="object"||Array.isArray(input)||Object.keys(input).length)throw new AppError(400,"校验无需参数");send(res,await queue.add(s=>verifyGoogleAccount({accounts:googleAccounts,backends},match[2],match[1],s),signal,{key:match[2],lane:"login",cancelable:true,metadata:{kind:"verification",account_id:match[2],summary:"读取目录并测试 "+match[1]}}));});
   const aistChat=registerAIStudio({register,body,send,backends,queue,store,logger});
   const robinChat=registerAIStudio({register,body,send,backends,queue,store,logger},"robin");
   registerTasks({register,send,tasks,owner:sessionOwner});
@@ -418,17 +421,11 @@ export async function createApplication(options = {}) {
       }),202);
     }else send(res,await perform(params,signal,context));
   });
-  async function refreshCredentialCatalog(signal){
-    const accounts=await googleAccounts.list();
-    for(const account of accounts){if(!account.enabled)continue;
-      const aist=backendEnabled(account,"aist")&&account.cookie_revision&&(account.grants?.aist==="synced"||!account.models?.length);
-      const robin=backendEnabled(account,"robin")&&account.grants?.robin==="authenticated"&&!account.robin_models?.length;
-      if(!aist&&!robin)continue;
-      try{await queue.add(async jobSignal=>{if(aist)await backends.get("aist").engine.prepareAccount(account,jobSignal);if(robin)await backends.get("robin").modes(account,jobSignal);},signal,{key:account.id,cancelable:true,metadata:{kind:"models",account_id:account.id,summary:"读取同步账号模型目录（无生成）"}});}catch(error){logger.warn("backend.catalog_failed",{stage:aist?"aist":"robin",status:error.status||503,code:error.code||"backend_models_failed"});}
-    }
-  }
-  register("GET","/api/models/catalog","read",async({res,signal})=>{await refreshCredentialCatalog(signal);send(res,{models:await modelCatalog(store,backends)});});
-  register("GET","/v1/models","api",async({res,signal})=>{await refreshCredentialCatalog(signal);send(res,publicModels(await modelCatalog(store,backends)));});
+  const catalogRefresh=new CatalogRefresh({accounts:googleAccounts,backends,queue,logger});
+  async function cachedCatalog(){const models=await modelCatalog(store,backends);await catalogRefresh.start();return{models,refresh:catalogRefresh.status(),cache:{storage:storage?'postgresql':'file'}};}
+  register("GET","/api/models/catalog","read",async({res})=>send(res,await cachedCatalog()));
+  register("POST","/api/models/catalog/refresh","mutation",async({req,res})=>{const input=await body(req);if(!input||typeof input!=="object"||Array.isArray(input)||Object.keys(input).length)throw new AppError(400,"刷新请求无需参数");send(res,{refresh:await catalogRefresh.start({force:true})},202);});
+  register("GET","/v1/models","api",async({res})=>send(res,publicModels((await cachedCatalog()).models)));
   const backendCursors=new Map();
   register(
     "POST",
@@ -440,7 +437,7 @@ export async function createApplication(options = {}) {
       logger.info("request.received",{request_id:requestId,api_key_id:principal.key_id,api_key_name:principal.key_name,stage:"request_prepare"});
       const input=await body(req);
       let backend=input.backend||process.env.DEFAULT_BACKEND||"agy";
-      if(backend==="auto"){let model=(await modelCatalog(store,backends)).find(m=>m.id===input.model);if(!model?.sources.some(s=>s.available)){await refreshCredentialCatalog(signal);model=(await modelCatalog(store,backends)).find(m=>m.id===input.model);}const choices=[...new Set(model?.sources.filter(s=>s.available).map(s=>s.backend)||[])];if(!choices.length)throw new AppError(404,"没有支持此模型的已验证后端","model_not_found");const cursor=backendCursors.get(input.model)||0;backend=choices[cursor%choices.length];backendCursors.set(input.model,cursor+1);}
+      if(backend==="auto"){let model=(await modelCatalog(store,backends)).find(m=>m.id===input.model);if(!model?.sources.some(s=>s.available)){await catalogRefresh.start({force:true});await catalogRefresh.work;model=(await modelCatalog(store,backends)).find(m=>m.id===input.model);}const choices=[...new Set(model?.sources.filter(s=>s.available).map(s=>s.backend)||[])];if(!choices.length)throw new AppError(404,"没有支持此模型的已验证后端","model_not_found");const cursor=backendCursors.get(input.model)||0;backend=choices[cursor%choices.length];backendCursors.set(input.model,cursor+1);}
       if(backend==="aist"||backend==="robin"){
         return (backend==="aist"?aistChat:robinChat)({req,res,signal,principal,requestId},input);
       }
@@ -608,7 +605,7 @@ export async function createApplication(options = {}) {
     sessions,
     tasks,
     backends,
-    browserSync,
+    browserSync,catalogRefresh,
     logger,
     catalog: routes.map(({ method, path, access }) => ({
       method,
@@ -628,10 +625,10 @@ if (
   );
   const close = () => {
     app.tasks.close();
-    app.browserSync.close();
+    app.browserSync.close();app.catalogRefresh.close();
     app.loginManager.close();
     app.server.close();
-    Promise.all([app.browserSync.close(),app.store.pending, app.backends.close(), app.runner.close()]).then(()=>app.authVault?.close()).then(()=>app.storage?.close()).finally(() =>
+    Promise.all([app.catalogRefresh.close(),app.browserSync.close(),app.store.pending, app.backends.close(), app.runner.close()]).then(()=>app.authVault?.close()).then(()=>app.storage?.close()).finally(() =>
       process.exit(0),
     );
   };
