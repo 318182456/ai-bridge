@@ -26,7 +26,7 @@ export class ManualBrowser{
   for(let n=90;n<150;n++){try{await access("/tmp/.X11-unix/X"+n);continue;}catch(e){if(e.code!=="ENOENT")throw e;}try{const path=join(tmpdir(),"ai-bridge-display-"+n+".lock");this.lock=await open(path,"wx",0o600);this.lockPath=path;this.display=":"+n;break;}catch(e){if(e.code!=="EEXIST")throw e;}}
   if(!this.display)throw failure();await this.command("xauth",["-f",this.authority,"source","-"],{input:"add "+this.display+" . "+randomBytes(16).toString("hex")+"\n"});
   this.xvfb=this.child("Xvfb",[this.display,"-screen","0","1600x1000x24","-nolisten","tcp","-auth",this.authority,"-noreset"]);
-  let ready=false;for(let i=0;i<40;i++){this.assertActive();try{await this.command("xdpyinfo",["-display",this.display],{max:65536,timeout:1000});ready=true;break;}catch{await sleep(100);}}if(!ready)throw failure();
+  let ready=false;for(let i=0;i<40;i++){this.assertActive();try{await this.command("xdotool",["getdisplaygeometry"],{max:1024,timeout:1000});ready=true;break;}catch{await sleep(100);}}if(!ready)throw failure();
   if(proxySetting())this.proxy=await manualProxy();
   // No automation, debugging or headless switches. Show the actual browser chrome/address bar.
   this.args=["--user-data-dir="+this.profile,"--no-first-run","--no-default-browser-check","--disable-dev-shm-usage","--password-store=basic","--lang=zh-CN","--window-position=0,0","--window-size=1100,850",...(this.proxy?["--proxy-server="+this.proxy.server,"--disable-http2"]:[]),this.url];
