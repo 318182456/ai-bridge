@@ -92,7 +92,7 @@ function renderAccounts() {
     quota5.id="quota5-"+a.id;quotaWeek.id="quotaWeek-"+a.id;
     const channels=text("td");
     if(a.native)channels.append(text("small","agy · "+(names[a.status]||a.status),a.native.enabled?"status-ready":"muted"));
-    if(a.google)for(const id of ["aist","robin"]){const grant=a.google.grants?.[id]||"not_authorized";const label=({verified:a.google.enabled?"已启用":"已验证 · 停用",authenticated:"待验证",not_authorized:"未授权",needs_attention:"需处理"})[grant]||grant;channels.append(text("small",id+" · "+label,grant==="verified"&&a.google.enabled?"status-ready":"muted"));}
+    if(a.google)for(const id of ["aist","robin"]){const grant=a.google.grants?.[id]||"not_authorized";const label=({verified:a.google.enabled?"已启用":"已验证 · 停用",authenticated:"已授权 · 待首次调用",synced:"Cookie 已同步 · 待首次调用",not_authorized:"未授权",needs_attention:"需处理"})[grant]||grant;channels.append(text("small",id+" · "+label,grant==="verified"&&a.google.enabled?"status-ready":"muted"));}
     row.append(selectCell,identity,channels,quota5,quotaWeek,
       text("td",count(a.requests)+" / "+count(a.successes)+" / "+count(a.failures)),text("td",a.token_reports?count(a.total_tokens):"未报告"));
     const ops = document.createElement("td"),

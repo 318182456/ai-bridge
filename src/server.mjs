@@ -1,3 +1,4 @@
+import {syncBrowserCredential} from './backends/browser-credential-sync.mjs';
 import {BrowserSync,registerBrowserSync} from "./admin/browser-sync.mjs";
 import {browserSyncScript} from "./admin/browser-sync-script.mjs";
 import {Postgres} from "./storage/postgres.mjs";
@@ -124,12 +125,12 @@ export async function createApplication(options = {}) {
   const backends=new Backends();
   const googleAccounts=new GoogleAccounts(dataDir,storage),googleGrants=new GoogleGrants(dataDir,{storage});
   if(options.aistudio)backends.register("aist",options.aistudio);
-  else backends.register("aist",new AIStudio({dataDir,logger,engine:new BrowserEngine({root:dataDir,logger,accounts:googleAccounts,vault:authVault,bindRobin:async(account,token,signal)=>{const before=await googleGrants.read(account.id);try{await googleGrants.bindRobin(account,token,signal);const robin=backends.get("robin");robin.cache.delete(account.id);await robin.verify(account,signal);return()=>googleGrants.save(account.id,before);}catch(error){await googleGrants.save(account.id,before);throw error;}}})}));
+  else backends.register("aist",new AIStudio({dataDir,logger,engine:new BrowserEngine({root:dataDir,logger,accounts:googleAccounts,vault:authVault,credentialProvider:async id=>(await googleGrants.read(id)).aist,bindRobin:async(account,token,signal)=>{const before=await googleGrants.read(account.id);try{await googleGrants.bindRobin(account,token,signal);const robin=backends.get("robin");robin.cache.delete(account.id);await robin.verify(account,signal);return()=>googleGrants.save(account.id,before);}catch(error){await googleGrants.save(account.id,before);throw error;}}})}));
   backends.register("robin",options.robin||new Robin({dataDir,logger,accounts:googleAccounts,tokenProvider:id=>googleGrants.robinToken(id)}));
   const googleAuthorization=new GoogleAuthorization({accounts:googleAccounts,grants:googleGrants,store,loginManager,robin:backends.get("robin")});
   if(!options.aistudio)backends.get("aist").engine.authorize=googleAuthorization.authorize.bind(googleAuthorization);
   const backendAccounts=new BackendAccounts({backends,queue,sessions,logger});
-  const browserSync=new BrowserSync({auth,accounts:googleAccounts,queue,logger,process:options.browserSyncProcess|| (async(input,signal,step)=>{for await(const event of backends.get("aist").engine.run("login",input,signal))if(event.browser_meta?.type==="status")step(event.browser_meta.status);})});
+  const browserSync=new BrowserSync({auth,accounts:googleAccounts,queue,logger,process:options.browserSyncProcess|| ((input,signal)=>syncBrowserCredential({accounts:googleAccounts,grants:googleGrants},input,signal))});
   backends.register("agy",{status:()=>({state:"managed",active_requests:queue.running}),close:async()=>{}});
   async function perform(params, signal, context={}) {
     const existing = params.session_id && params.session_id !== "new" ? sessions.get(params.session_id, context.owner) : null;
@@ -420,8 +421,17 @@ export async function createApplication(options = {}) {
       }),202);
     }else send(res,await perform(params,signal,context));
   });
-  register("GET","/api/models/catalog","read",async({res})=>send(res,{models:await modelCatalog(store,backends)}));
-  register("GET","/v1/models","api",async({res})=>send(res,publicModels(await modelCatalog(store,backends))));
+  async function refreshCredentialCatalog(signal){
+    const accounts=await googleAccounts.list();
+    for(const account of accounts){if(!account.enabled)continue;
+      const aist=account.cookie_revision&&(account.grants?.aist==="synced"||!account.models?.length);
+      const robin=account.grants?.robin==="authenticated"&&!account.robin_models?.length;
+      if(!aist&&!robin)continue;
+      try{await queue.add(async jobSignal=>{if(aist)await backends.get("aist").engine.prepareAccount(account,jobSignal);if(robin)await backends.get("robin").modes(account,jobSignal);},signal,{key:account.id,cancelable:true,metadata:{kind:"models",account_id:account.id,summary:"读取同步账号模型目录（无生成）"}});}catch(error){logger.warn("backend.catalog_failed",{stage:aist?"aist":"robin",status:error.status||503,code:error.code||"backend_models_failed"});}
+    }
+  }
+  register("GET","/api/models/catalog","read",async({res,signal})=>{await refreshCredentialCatalog(signal);send(res,{models:await modelCatalog(store,backends)});});
+  register("GET","/v1/models","api",async({res,signal})=>{await refreshCredentialCatalog(signal);send(res,publicModels(await modelCatalog(store,backends)));});
   const backendCursors=new Map();
   register(
     "POST",
@@ -433,7 +443,7 @@ export async function createApplication(options = {}) {
       logger.info("request.received",{request_id:requestId,api_key_id:principal.key_id,api_key_name:principal.key_name,stage:"request_prepare"});
       const input=await body(req);
       let backend=input.backend||process.env.DEFAULT_BACKEND||"agy";
-      if(backend==="auto"){const model=(await modelCatalog(store,backends)).find(m=>m.id===input.model);const choices=[...new Set(model?.sources.filter(s=>s.available).map(s=>s.backend)||[])];if(!choices.length)throw new AppError(404,"没有支持此模型的已验证后端","model_not_found");const cursor=backendCursors.get(input.model)||0;backend=choices[cursor%choices.length];backendCursors.set(input.model,cursor+1);}
+      if(backend==="auto"){let model=(await modelCatalog(store,backends)).find(m=>m.id===input.model);if(!model?.sources.some(s=>s.available)){await refreshCredentialCatalog(signal);model=(await modelCatalog(store,backends)).find(m=>m.id===input.model);}const choices=[...new Set(model?.sources.filter(s=>s.available).map(s=>s.backend)||[])];if(!choices.length)throw new AppError(404,"没有支持此模型的已验证后端","model_not_found");const cursor=backendCursors.get(input.model)||0;backend=choices[cursor%choices.length];backendCursors.set(input.model,cursor+1);}
       if(backend==="aist"||backend==="robin"){
         return (backend==="aist"?aistChat:robinChat)({req,res,signal,principal,requestId},input);
       }

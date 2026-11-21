@@ -1,3 +1,4 @@
+import {authResponse} from './google-auth-response.mjs';
 import {connectTLS,proxySetting} from "../runtime/tls-tunnel.mjs";
 import {mkdir,readFile,writeFile,rename} from "node:fs/promises";
 import {join} from "node:path";
@@ -30,7 +31,7 @@ export class GoogleGrants {
 function authForm(values,{signal}={}){
  const body=new URLSearchParams(values).toString();const agent=proxySetting()?new https.Agent({keepAlive:false}):false;if(agent)agent.createConnection=(_options,done)=>{connectTLS("android.clients.google.com",443,{signal}).then(socket=>done(null,socket),done);};return new Promise((resolve,reject)=>{
   const req=https.request({hostname:"android.clients.google.com",path:"/auth",method:"POST",agent,headers:{"content-type":"application/x-www-form-urlencoded","content-length":Buffer.byteLength(body),"user-agent":"GoogleAuth/1.4"},signal,timeout:20000},response=>{
-   let size=0;const chunks=[];response.on("data",b=>{size+=b.length;if(size>65536)response.destroy();else chunks.push(b);});response.once("error",()=>reject(new AppError(502,"Google 授权响应中断","google_auth_failed")));response.once("end",()=>{if(response.statusCode!==200)return reject(new AppError(response.statusCode===429?429:response.statusCode>=500?503:401,response.statusCode>=500||response.statusCode===429?"Google 授权服务暂不可用，请稍后重试":"Google 未接受此次授权",response.statusCode>=500||response.statusCode===429?"google_auth_unavailable":"google_auth_failed"));const fields=Object.create(null);for(const line of Buffer.concat(chunks).toString("utf8").split(/\r?\n/)){const i=line.indexOf("=");if(i>0)fields[line.slice(0,i)]=line.slice(i+1);}resolve(fields);});
+   let size=0;const chunks=[];response.on("data",b=>{size+=b.length;if(size>65536)response.destroy();else chunks.push(b);});response.once("error",()=>reject(new AppError(502,"Google 授权响应中断","google_auth_failed")));response.once("end",()=>{try{resolve(authResponse(response.statusCode,Buffer.concat(chunks).toString("utf8")));}catch(error){reject(error);}});
   });req.once("timeout",()=>req.destroy());req.once("error",()=>reject(new AppError(signal?.aborted?499:502,signal?.aborted?"授权已取消":"Google 授权连接失败",signal?.aborted?"cancelled":"google_auth_failed")));req.once("close",()=>agent&&agent.destroy());req.end(body);
  });
 }

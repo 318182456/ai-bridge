@@ -4,7 +4,7 @@
 
 ## 当前开发状态
 
-当前发布版 `0.4.0-alpha.12` 已提供 Docker 镜像与 amd64/arm64 原生 Linux 安装包。账号列表默认通过配套脚本在本机浏览器登录 AIST / Robin；NAS 完整浏览器登录作为兼容入口保留：登录期间由独立 Chromium 显示真实地址栏，用户手动操作；不使用 Playwright、CDP 或自动填写 Google 登录表单。完成 AI Studio 登录后点击“已完成登录，继续验证”，程序关闭完整浏览器，再读取模型并实际生成验证。账号列表中的“本机登录 Robin”或更多操作中的“NAS 授权 Robin”可直接复用已有 Google 身份进入 Robin 授权，不依赖 AI Studio 生成成功；完成后单独调用一次 Robin 模型验证。两个后端独立显示授权状态。agy 沿用已有官方 CLI 登录入口。
+当前发布版 `0.4.0-alpha.13` 已提供 Docker 镜像与 amd64/arm64 原生 Linux 安装包。账号列表默认通过配套脚本在本机浏览器登录 AIST / Robin；NAS 完整浏览器登录作为兼容入口保留：登录期间由独立 Chromium 显示真实地址栏，用户手动操作；不使用 Playwright、CDP 或自动填写 Google 登录表单。完成 AI Studio 登录后点击“已完成登录，继续验证”，程序关闭完整浏览器，再读取模型并实际生成验证。账号列表中的“本机登录 Robin”或更多操作中的“NAS 授权 Robin”可直接复用已有 Google 身份进入 Robin 授权，不依赖 AI Studio 生成成功；完成后单独调用一次 Robin 模型验证。两个后端独立显示授权状态。agy 沿用已有官方 CLI 登录入口。
 
 同一 Google 身份可以复用浏览器登录资料，但各产品权限并不等价。Google 仍可能拒绝账号、地区或浏览器；只有实际验证成功才显示对应后端已就绪，界面与模拟测试通过不代表 Google 接受真实登录。
 
@@ -53,7 +53,7 @@ docker compose up -d
 
 | 变量 | 默认/用途 |
 | --- | --- |
-| `IMAGE_TAG` | `0.4.0-alpha.12`，发布版本；按需升级 |
+| `IMAGE_TAG` | `0.4.0-alpha.13`，发布版本；按需升级 |
 | `ADMIN_PASSWORD` | 管理页登录密码，至少20字符 |
 | `API_KEY` | 客户端Bearer密钥，至少20字符，须与管理密码不同 |
 | `PORT` / `BIND_ADDRESS` | `18861` / `0.0.0.0`，宿主机访问入口 |
@@ -204,6 +204,6 @@ Google 登录在独立弹窗中显示，可收起后继续、放大或适应窗�
 
 建议使用支持 HttpOnly Cookie 的 Tampermonkey Beta，在扩展设置中允许 Cookie API 读取 HttpOnly。普通网页无法读取跨站登录 Cookie；不支持的手机脚本管理器请使用 NAS 远程登录。官方限制见 [Tampermonkey Cookie API 文档](https://www.tampermonkey.net/documentation.php?locale=en&q=GM_cookie)。
 
-完成 Google 登录后，在 Google 页右下角脚本面板点击“登录完成，安全同步”，再回管理页查看结果。AIST 同步 Google 会话 Cookie，Robin 同步该授权过程产生的 oauth_token；服务会核对账号身份并执行一次真实模型调用，只有通过才更新对应后端的认证状态。脚本无需管理员密码或长期 API 密钥，不向原 Catie 服务发送内容。
+完成 Google 登录后，在 Google 页右下角脚本面板点击“登录完成，安全同步”，再回管理页查看结果。AIST 同步 Google 会话 Cookie，Robin 同步该授权过程产生的 oauth_token；AIST 仅在数据库私有凭据中保存 Cookie，登录时不启动 NAS 浏览器、不读取模型、不测试生成。Robin 仅将一次性授权结果交换成可续用的凭据，不发送测试消息。界面分别显示“Cookie 已同步”或“已授权 · 待首次调用”。主动查询模型或首次调用时按需读取模型目录；AIST 会核对所选 Google 身份，首次真实调用成功后才标记已验证。脚本无需管理员密码或长期 API 密钥，不向原 Catie 服务发送内容。
 
 配对有效15分钟、绑定当前管理会话且只能使用一次；退出登录、取消或服务重启后重新配对。配对令牌不写数据库，Google 凭据沿用现有认证持久化。管理地址需 HTTPS（本机 localhost 调试例外）；已有 SSO 仍需正常登录。Google 的设备绑定、账号权限、地区或风控限制可能导致导入后仍返回403，Cookie 同步不保证解除拒绝。
