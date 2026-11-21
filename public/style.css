@@ -117,7 +117,7 @@ a.metric:hover{border-color:var(--primary);text-decoration:none}.metric-label{di
 /* Fixed shell; each page/panel owns its scroll area. */
 html,body{height:100%;overflow:hidden}.app-layout{height:100dvh;min-height:0}.main-column{height:100dvh;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .topbar,.page-heading,.page-footer{flex-shrink:0}.sidebar nav{min-height:0;overflow:auto}.sidebar .nav-caption{flex-shrink:0}
-#main{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}#workspace{flex:1;min-height:0;overflow:auto}.login-card{flex-shrink:0;overflow:auto}
+#main{width:100%;flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}#workspace{width:100%;min-width:0;flex:1;min-height:0;overflow:auto}.login-card{flex-shrink:0;overflow:auto}
 [data-page=queue] #workspace{display:flex;overflow:hidden}.queue-card{flex:1;min-height:0;display:flex;flex-direction:column;margin-bottom:0}.queue-card>.section-heading,.queue-card>.summary-strip,.queue-card>.filters,.queue-card>.note{flex-shrink:0}
 .queue-scroll{flex:1;min-height:90px;overflow:auto}.queue-scroll table{min-width:880px}.queue-scroll td:first-child{max-width:370px}.queue-scroll td:first-child small{white-space:pre-wrap;max-height:65px;overflow:auto}.queue-scroll code{display:block;color:var(--muted);font-size:10px}
 .detail-dialog{width:min(900px,calc(100vw - 28px));max-height:85dvh;padding:0;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);overflow:hidden}
@@ -130,3 +130,16 @@ html,body{height:100%;overflow:hidden}.app-layout{height:100dvh;min-height:0}.ma
 .section-tabs [role=tab]{background:transparent;border-color:transparent;color:var(--muted);border-radius:5px}
 .section-tabs [aria-selected=true]{color:var(--primary);background:var(--primary-soft);border-color:var(--line)}
 #googleAddHost .inline-panel{margin-bottom:0}.accounts-table small{display:block}
+
+/* Bound intrinsic table/code widths at the shared shell, not only at body overflow. */
+.topbar-left{min-width:0;flex:1}.breadcrumb{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topbar>.toolbar{flex-shrink:0}.section-heading>div,.endpoint-row>div{min-width:0}.endpoint-row>div{flex:1}
+.scroll{min-width:0;max-width:100%;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+.sidebar{height:100dvh}.sidebar-bottom{padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(max-width:780px){
+ .topbar{padding-right:max(12px,env(safe-area-inset-right));padding-left:max(12px,env(safe-area-inset-left));gap:6px}
+ .topbar-left{gap:5px}.topbar-left>.icon-button{flex-shrink:0}.topbar .toolbar{flex-wrap:nowrap}
+ .topbar .status-pill{max-width:100px;overflow:hidden;text-overflow:ellipsis}.login-card{width:100%;max-height:100%;margin-top:0}
+ input:not([type=checkbox]),select,textarea{font-size:16px}
+ .endpoint-row{gap:10px}.endpoint-row>.button,.endpoint-row>button{flex-shrink:0}
+}
