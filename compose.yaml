@@ -1,7 +1,7 @@
 name: ai-bridge
 services:
   app:
-    image: ghcr.io/318182456/ai-bridge:${IMAGE_TAG:-0.4.0-alpha.11}
+    image: ghcr.io/318182456/ai-bridge:${IMAGE_TAG:-0.4.0-alpha.12}
     init: true
     restart: unless-stopped
     env_file: .env

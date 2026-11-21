@@ -1,3 +1,4 @@
+import {mountBrowserSync} from "../components/browser-sync.mjs";
 import {accountDirectory} from "../components/account-directory.mjs";
 import {mountGoogleLogin} from "../components/google-login.mjs";
 import {el,number as count,fmtDate,note} from "../core.mjs";
@@ -13,6 +14,7 @@ export function mount(ctx){
     else{$("addAccountPanel").hidden=false;$("googleAddHost").append(googlePanel);}
   }
   const googleLogin=mountGoogleLogin(ctx,{onChange:refresh,onOpen:locateGoogle});
+  const localPanel=$("browserSyncPanel"),localLogin=mountBrowserSync(ctx,{onChange:refresh,onOpen:id=>{const a=directory().find(a=>a.google?.id===id);if(a){if(localPanel.parentElement===panels.get(a.id))return;feedbackRow(a.id,"本机浏览器登录").append(localPanel);}else{$("addAccountPanel").hidden=false;$("googleAddHost").append(localPanel);}}});
   function visibleAccounts(){
     const query=$("accountSearch").value.trim().toLowerCase(),status=$("accountStatus").value;
     return directory().filter(a=>(!query||[a.identity,a.name,a.id,a.google?.id].join(" ").toLowerCase().includes(query))&&
@@ -103,13 +105,15 @@ function renderAccounts() {
           const target = feedbackRow(a.id, "操作失败");
           target.append(text("p", e.message, "status-error"));
         });
-      const primary=label==="刷新额度"||label==="授权 AI Studio"||label==="授权 Robin"||(!a.google&&(label==="启用 agy"||label==="停用 agy"||(label==="登录 agy"&&!a.checked_at)));
+      const primary=label==="刷新额度"||label==="本机登录 AIST"||label==="本机登录 Robin"||(!a.google&&(label==="启用 agy"||label==="停用 agy"||(label==="登录 agy"&&!a.checked_at)));
       (primary?bar:more).append(b);
       if(["starting","running","submitted","checking"].includes(loginStates.get(a.id))&&label!=="登录 agy")b.disabled=true;
     };
     if(a.google){
-      button("授权 AI Studio",()=>googleLogin.begin(a.google.id,"aist"));
-      button("授权 Robin",()=>googleLogin.begin(a.google.id,"robin"));
+      button("本机登录 AIST",()=>localLogin.begin(a.google.id,"aist"));
+      button("本机登录 Robin",()=>localLogin.begin(a.google.id,"robin"));
+      button("NAS 授权 AIST",()=>googleLogin.begin(a.google.id,"aist"));
+      button("NAS 授权 Robin",()=>googleLogin.begin(a.google.id,"robin"));
       button(a.google.enabled?"停用 AI Studio / Robin":"启用 AI Studio / Robin",async()=>{await api("/api/backends/aist/accounts/"+a.google.id,{method:"PATCH",data:{enabled:!a.google.enabled}});await refresh();});
     }
     if(a.native){
@@ -415,8 +419,8 @@ async function showLogin(a,resume=false){
   return {async render(){
     state=ctx.state;shared=(await api("/api/backends/aist/accounts")).accounts||[];renderAccounts();selectionInfo();$("accountCount").textContent=visibleAccounts().length+" / "+directory().length;
     ensureQuotas();
-    if(!resumed){resumed=true;await googleLogin.resume();const id=sessionStorage.getItem("agy.lastLogin"),a=state.accounts.find(x=>x.id===id);
+    if(!resumed){resumed=true;await googleLogin.resume();localLogin.resume();const id=sessionStorage.getItem("agy.lastLogin"),a=state.accounts.find(x=>x.id===id);
       if(a){const view=await api("/api/accounts/"+id+"/login");if(view.state!=="idle")showLogin(a,true);}
     }
-  },cleanup(){active=false;googleLogin.cleanup();for(const timer of timers)clearTimeout(timer);}};
+  },cleanup(){active=false;googleLogin.cleanup();localLogin.cleanup();for(const timer of timers)clearTimeout(timer);}};
 }

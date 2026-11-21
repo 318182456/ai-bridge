@@ -1,3 +1,5 @@
+import {BrowserSync,registerBrowserSync} from "./admin/browser-sync.mjs";
+import {browserSyncScript} from "./admin/browser-sync-script.mjs";
 import {Postgres} from "./storage/postgres.mjs";
 import {AuthVault} from "./storage/auth-vault.mjs";
 import {BrowserEngine} from "./backends/browser-engine.mjs";
@@ -127,6 +129,7 @@ export async function createApplication(options = {}) {
   const googleAuthorization=new GoogleAuthorization({accounts:googleAccounts,grants:googleGrants,store,loginManager,robin:backends.get("robin")});
   if(!options.aistudio)backends.get("aist").engine.authorize=googleAuthorization.authorize.bind(googleAuthorization);
   const backendAccounts=new BackendAccounts({backends,queue,sessions,logger});
+  const browserSync=new BrowserSync({auth,accounts:googleAccounts,queue,logger,process:options.browserSyncProcess|| (async(input,signal,step)=>{for await(const event of backends.get("aist").engine.run("login",input,signal))if(event.browser_meta?.type==="status")step(event.browser_meta.status);})});
   backends.register("agy",{status:()=>({state:"managed",active_requests:queue.running}),close:async()=>{}});
   async function perform(params, signal, context={}) {
     const existing = params.session_id && params.session_id !== "new" ? sessions.get(params.session_id, context.owner) : null;
@@ -194,6 +197,7 @@ export async function createApplication(options = {}) {
   registerQueue({register,send,queue});
   registerBackends({register,send,backends});
   registerBackendAccounts({register,send,body,backends,accounts:backendAccounts,owner:sessionOwner});
+  registerBrowserSync({register,send,body,auth,sync:browserSync,script:browserSyncScript});
   const aistChat=registerAIStudio({register,body,send,backends,queue,store,logger});
   const robinChat=registerAIStudio({register,body,send,backends,queue,store,logger},"robin");
   registerTasks({register,send,tasks,owner:sessionOwner});
@@ -214,7 +218,7 @@ export async function createApplication(options = {}) {
     async ({ req, res, principal }) => {
       if (loginManager.current?.owner === principal.token) loginManager.close();
       tasks.closeOwner(sessionOwner(principal));
-      backendAccounts.closeOwner(sessionOwner(principal));
+      backendAccounts.closeOwner(sessionOwner(principal));browserSync.closeOwner(sessionOwner(principal));
       upgrades.closeOwner(principal.token);
       await sessions.closeWhere(s => s.owner === sessionOwner(principal));
       auth.sessions.delete(principal.token);
@@ -602,7 +606,7 @@ export async function createApplication(options = {}) {
     sessions,
     tasks,
     backends,
-    backendAccounts,
+    backendAccounts,browserSync,
     upgrades,
     logger,
     catalog: [...upgrades.catalog(),...routes.map(({ method, path, access }) => ({
@@ -623,11 +627,11 @@ if (
   );
   const close = () => {
     app.tasks.close();
-    app.backendAccounts.close();
+    app.backendAccounts.close();app.browserSync.close();
     app.upgrades.close();
     app.loginManager.close();
     app.server.close();
-    Promise.all([app.store.pending, app.backends.close(), app.runner.close()]).then(()=>app.authVault?.close()).then(()=>app.storage?.close()).finally(() =>
+    Promise.all([app.browserSync.close(),app.store.pending, app.backends.close(), app.runner.close()]).then(()=>app.authVault?.close()).then(()=>app.storage?.close()).finally(() =>
       process.exit(0),
     );
   };
