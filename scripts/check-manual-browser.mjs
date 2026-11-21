@@ -10,6 +10,6 @@ try{await browser.start(new AbortController().signal);await new Promise(r=>setTi
  let typed=false;for(let i=0;i<30;i++){if(inputReached){typed=true;break;}await new Promise(r=>setTimeout(r,100));}if(!typed)throw Error("Desktop clipboard/keyboard did not reach the field");
  await browser.resize({width:640,height:600});const smaller=await browser.capture();if(smaller.width!==640||smaller.height!==600)throw Error("Desktop resize failed");await browser.close();
  // Fixture-only verification after the unmanaged browser exits; no Google login is automated.
- const context=await chromium.launchPersistentContext(profile,{headless:true,chromiumSandbox:true});try{if(!(await context.cookies(url)).some(c=>c.name==="synthetic_cookie"&&c.value==="present"))throw Error("Manual browser cookies did not persist");}finally{await context.close();}
+ const context=await chromium.launchPersistentContext(profile,{headless:true,chromiumSandbox:true,executablePath:browser.executable});try{if(!(await context.cookies(url)).some(c=>c.name==="synthetic_cookie"&&c.value==="present"))throw Error("Manual browser cookies did not persist");}finally{await context.close();}
  console.log(JSON.stringify({manual_chrome:true,address_bar_visible:true,x11_input:true,resized:true,cookies_preserved:true,frame_bytes:image.bytes.length}));
 }finally{await browser.close();await new Promise(r=>server.close(r));await rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
