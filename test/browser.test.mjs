@@ -72,3 +72,13 @@ test("Google login emits a real frame before navigation and returns a safe netwo
  try{await iterator.next();await iterator.next();await iterator.next();const image=await iterator.next();assert.equal(navigated,false);assert.equal(Buffer.from(image.value.browser_binary,'base64').toString(),'synthetic-frame');await assert.rejects(iterator.next(),e=>e.code==='google_page_timeout'&&!e.message.includes('synthetic-private'));assert.equal(released,true);}
  finally{await iterator.return();await rm(root,{recursive:true,force:true});}
 });
+
+
+test("login viewport follows the owner window within bounded dimensions and pointer coordinates",async()=>{
+ const {BrowserEngine}=await import('../src/backends/browser-engine.mjs');let size={width:1280,height:800};const moves=[],sizes=[];
+ const page={viewportSize:()=>size,setViewportSize:async next=>{size=next;sizes.push(next);},mouse:{move:async(x,y)=>moves.push([x,y])}};
+ const engine=new BrowserEngine({accounts:{},browser:{}}),job={page};engine.jobs.set('owned',job);
+ engine.input('owned',{type:'viewport',context:'foreign',width:390,height:640});engine.input('owned',{type:'viewport',context:'owned',width:99999,height:640});
+ engine.input('owned',{type:'viewport',context:'owned',width:390,height:640});engine.input('owned',{type:'pointer',context:'owned',action:'move',x:9999,y:9999});await job.inputs;
+ assert.deepEqual(sizes,[{width:390,height:640}]);assert.deepEqual(moves,[[389,639]]);
+});

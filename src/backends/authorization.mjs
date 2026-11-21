@@ -1,7 +1,7 @@
 import {setTimeout as sleep} from "node:timers/promises";
 import {AppError} from "../common.mjs";
 function callback(url){let parsed;try{parsed=new URL(url);}catch{return null;}const redirect=parsed.searchParams.get("redirect_uri");if(parsed.protocol!=="https:"||parsed.hostname!=="accounts.google.com"||!redirect)throw new AppError(400,"官方 CLI 授权地址不符合预期","invalid_oauth_url");const target=new URL(redirect);if(target.protocol!=="https:"||!(target.hostname==="google.com"||target.hostname.endsWith(".google.com")))throw new AppError(400,"CLI 授权回调不在 Google 官方站点","invalid_oauth_redirect");return target;}
-async function frame(page,id){return[{browser_meta:{type:"frame",context:id,width:1280,height:800},native_job:id},{browser_binary:(await page.screenshot({type:"jpeg",quality:65,timeout:10000})).toString("base64"),native_job:id}];}
+async function frame(page,id){return[{browser_meta:{type:"frame",context:id,...(page.viewportSize?.()||{width:1280,height:800})},native_job:id},{browser_binary:(await page.screenshot({type:"jpeg",quality:65,timeout:10000})).toString("base64"),native_job:id}];}
 export class GoogleAuthorization {
  constructor({accounts,grants,store,loginManager,robin}){Object.assign(this,{accounts,grants,store,loginManager,robin});}
  async *authorize({account,context,page,signal,id,owner,setPage}){

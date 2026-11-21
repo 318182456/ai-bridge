@@ -27,7 +27,7 @@ export class BrowserEngine {
   const lease=await this.browser.acquire(profile,signal),context=lease.context,page=await context.newPage();const job={page,context,id};this.jobs.set(id,job);let models=[];const detach=this.captureCatalog(page,value=>{models=value;});const abort=()=>page.close().catch(()=>{});signal?.addEventListener("abort",abort,{once:true});
   try{
    yield{browser_meta:{type:"status",status:"starting"},native_job:id};
-   yield{browser_meta:{type:"frame",context:id,width:1280,height:800},native_job:id};yield{browser_binary:(await page.screenshot({type:"jpeg",quality:65,timeout:10000})).toString("base64"),native_job:id};
+   yield{browser_meta:{type:"frame",context:id,...(page.viewportSize?.()||{width:1280,height:800})},native_job:id};yield{browser_binary:(await page.screenshot({type:"jpeg",quality:65,timeout:10000})).toString("base64"),native_job:id};
    try{await page.goto("https://aistudio.google.com/prompts/new_chat",{waitUntil:"commit",timeout:45000});}catch(error){
     // ASVS V16.5: expose an actionable class, never raw navigation URLs or credentials.
     if(signal?.aborted)throw cancelled();
@@ -36,7 +36,7 @@ export class BrowserEngine {
     if(/PROXY|TUNNEL/.test(network))throw new AppError(502,"Google 登录代理连接失败，请检查代理地址和认证配置","google_proxy_failed");
     if(/CERT|SSL/.test(network))throw new AppError(502,"Google 登录连接的 TLS 证书校验失败","google_tls_failed");
     throw new AppError(502,"Google 登录页连接失败，请检查 NAS 出口网络","google_page_failed");
-   }const until=Date.now()+10*60000;
+   }yield{browser_meta:{type:"status",status:"waiting"},native_job:id};const until=Date.now()+10*60000;
    while(Date.now()<until){if(signal?.aborted)throw cancelled();
     const url=new URL(page.url());if(url.hostname==="aistudio.google.com"&&url.pathname.includes("available-regions"))throw new AppError(403,"Google 不支持当前出口地区或账号","region_or_account_unsupported");
     const email=url.hostname==="aistudio.google.com"?await this.email(page):"";
@@ -50,7 +50,7 @@ export class BrowserEngine {
       if(this.authorize)for await(const value of this.authorize({account,context,page,signal,id,owner:input.owner,setPage:p=>{job.page=p;}}))yield value;
       yield{result:{account:{id:profile,email,state:account.state}},native_job:id};return;
     }
-    yield{browser_meta:{type:"frame",context:id,width:1280,height:800},native_job:id};const bytes=await page.screenshot({type:"jpeg",quality:65,timeout:10000});yield{browser_binary:bytes.toString("base64"),native_job:id};await sleep(180,undefined,{signal});
+    yield{browser_meta:{type:"frame",context:id,...(page.viewportSize?.()||{width:1280,height:800})},native_job:id};const bytes=await page.screenshot({type:"jpeg",quality:65,timeout:10000});yield{browser_binary:bytes.toString("base64"),native_job:id};await sleep(180,undefined,{signal});
    }throw new AppError(408,"Google 登录超过十分钟","login_timeout");
   }catch(e){if(signal?.aborted)throw cancelled();if(e instanceof AppError)throw e;throw new AppError(503,"Google 浏览器登录未完成，请重试","browser_login_failed");}
   finally{detach();this.jobs.delete(id);signal?.removeEventListener("abort",abort);await page.close().catch(()=>{});lease.release();await this.browser.checkpoint?.(profile);if(!verified&&previous&&this.vault)await this.vault.restore("google",profile,{force:true});}
@@ -73,6 +73,6 @@ export class BrowserEngine {
   }catch(e){if(signal?.aborted)throw cancelled();if(e instanceof AppError)throw e;throw new AppError(502,"AI Studio 页面请求未完成","studio_browser_failed");}
   finally{signal?.removeEventListener("abort",abort);await page.close().catch(()=>{});lease.release();}
  }
- input(id,value){const j=this.jobs.get(id);if(!j||value.context!==id)return;const page=j.page;const task=async()=>{if(value.type==="text"&&typeof value.text==="string"&&value.text.length<=16384)await page.keyboard.insertText(value.text);else if(value.type==="key"&&["down","up"].includes(value.action)&&typeof value.key==="string"&&value.key.length<=30)await page.keyboard[value.action](value.key);else if(value.type==="pointer"&&Number.isFinite(value.x)&&Number.isFinite(value.y)){await page.mouse.move(Math.max(0,Math.min(1279,value.x)),Math.max(0,Math.min(799,value.y)));if(["down","up"].includes(value.action))await page.mouse[value.action]({button:"left"});}else if(value.type==="wheel"&&Number.isFinite(value.dx)&&Number.isFinite(value.dy))await page.mouse.wheel(Math.max(-2000,Math.min(2000,value.dx)),Math.max(-2000,Math.min(2000,value.dy)));};j.inputs=(j.inputs||Promise.resolve()).then(task).catch(()=>{});}
+ input(id,value){const j=this.jobs.get(id);if(!j||value.context!==id)return;const page=j.page;const task=async()=>{if(value.type==="viewport"&&Number.isInteger(value.width)&&value.width>=320&&value.width<=1920&&Number.isInteger(value.height)&&value.height>=240&&value.height<=1200)await page.setViewportSize({width:value.width,height:value.height});else if(value.type==="text"&&typeof value.text==="string"&&value.text.length<=16384)await page.keyboard.insertText(value.text);else if(value.type==="key"&&["down","up"].includes(value.action)&&typeof value.key==="string"&&value.key.length<=30)await page.keyboard[value.action](value.key);else if(value.type==="pointer"&&Number.isFinite(value.x)&&Number.isFinite(value.y)){await page.mouse.move(Math.max(0,Math.min((page.viewportSize?.()?.width||1280)-1,value.x)),Math.max(0,Math.min((page.viewportSize?.()?.height||800)-1,value.y)));if(["down","up"].includes(value.action))await page.mouse[value.action]({button:"left"});}else if(value.type==="wheel"&&Number.isFinite(value.dx)&&Number.isFinite(value.dy))await page.mouse.wheel(Math.max(-2000,Math.min(2000,value.dx)),Math.max(-2000,Math.min(2000,value.dy)));};j.inputs=(j.inputs||Promise.resolve()).then(task).catch(()=>{});}
  async close(){for(const j of this.jobs.values())await j.page.close().catch(()=>{});this.jobs.clear();await this.accounts.pending;await this.browser.close();}
 }
