@@ -16,7 +16,7 @@ export function registerAdmin(ctx){
     const accounts=[...new Set(input.ids)].map(id=>store.get(id)),skipped=[];let updated=0;
     for(const a of accounts){
       if(input.enabled&&(!a.checked_at||!a.models.length||["login_required","account_suspended","generation_unverified"].includes(a.status))){skipped.push({id:a.id,name:a.name,reason:"需先完成登录校验"});continue;}
-      a.enabled=input.enabled;if(a.enabled)a.status="ready";updated++;
+      a.enabled=input.enabled;if(!a.enabled){a.last_error=null;a.last_verification_error=null;a.quota_error=null;}if(a.enabled)a.status="ready";updated++;
     }
     await store.save();
     await sessions?.closeWhere(s => accounts.some(a => a.id === s.account && !a.enabled));

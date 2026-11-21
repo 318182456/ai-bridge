@@ -45,5 +45,6 @@ export class Postgres {
  }
  async profile(kind,id){return(await this.query("SELECT archive,checksum,metadata,revision FROM ai_bridge.auth_profiles WHERE kind=$1 AND id=$2",[kind,id])).rows[0]||null;}
  async putProfile(kind,id,archive,metadata){const checksum=hash(archive);await this.query("INSERT INTO ai_bridge.auth_profiles(kind,id,checksum,archive,metadata) VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(kind,id) DO UPDATE SET checksum=EXCLUDED.checksum,archive=EXCLUDED.archive,metadata=EXCLUDED.metadata,revision=ai_bridge.auth_profiles.revision+1,updated_at=now() WHERE ai_bridge.auth_profiles.checksum<>EXCLUDED.checksum",[kind,id,checksum,archive,JSON.stringify(metadata)]);return checksum;}
+ async deleteProfile(kind,id){await this.query("DELETE FROM ai_bridge.auth_profiles WHERE kind=$1 AND id=$2",[kind,id]);}
  async close(){if(this.closed)return;await this.pending.catch(()=>{});this.closed=true;if(this.lease){await this.lease.query("SELECT pg_advisory_unlock(193382,1)").catch(()=>{});this.lease.release();this.lease=null;}await this.pool.end().catch(()=>{});}
 }

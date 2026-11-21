@@ -49,5 +49,6 @@ export class AuthVault {
   for(const p of prior?.metadata.critical||[])if(!await exists(join(path,p)))throw new AppError(503,"授权资料不完整，未覆盖数据库中有效快照","auth_snapshot_incomplete");
   await this.storage.putProfile(kind,id,archive,{critical:[...new Set(critical)],format:1});this.validated.delete(key);this.failures.delete(key);return true;
  }).catch(error=>{this.failures.add(key);this.logger?.warn("auth.snapshot_failed",{code:error.code||"auth_snapshot_failed",stage:kind});if(strict)throw error;return false;});}
+ async forget(kind,id){const path=this.path(kind,id),key=kind+":"+id;return this.serial(key,async()=>{this.validated.delete(key);await this.storage.deleteProfile(kind,id);await rm(path,{recursive:true,force:true});this.failures.delete(key);});}
  async close(){await Promise.allSettled([...this.chains.values()]);}
 }

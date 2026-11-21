@@ -1,3 +1,4 @@
+import {registerBackendAuthorization} from './admin/backend-authorization.mjs';
 import {registerGoogleAccounts} from './admin/google-accounts.mjs';
 import {backendEnabled} from './backends/account-state.mjs';
 import {syncBrowserCredential} from './backends/browser-credential-sync.mjs';
@@ -196,7 +197,8 @@ export async function createApplication(options = {}) {
   registerSessions({register,send,sessions});
   registerQueue({register,send,queue});
   registerBackends({register,send,backends});
-  registerBackendAccounts({register,send,body,backends});
+  registerBackendAccounts({register,send,body,backends,queue});
+  registerBackendAuthorization({register,send,accounts:googleAccounts,grants:googleGrants,backends,queue,sync:browserSync,store,sessions,runner,loginManager,authVault,dataDir});
   registerBrowserSync({register,send,body,auth,sync:browserSync,script:browserSyncScript});
   registerGoogleAccounts({register,send,body,accounts:googleAccounts,store,queue,sync:browserSync,browser:backends.get("aist").engine?.browser||{}});
   register("POST",/^\/api\/backends\/(aist|robin)\/accounts\/(g_[a-f0-9]{24})\/verify$/,"mutation",async({req,res,match,signal})=>{const input=await body(req);if(!input||typeof input!=="object"||Array.isArray(input)||Object.keys(input).length)throw new AppError(400,"校验无需参数");send(res,await queue.add(s=>verifyGoogleAccount({accounts:googleAccounts,backends},match[2],match[1],s),signal,{key:match[2],lane:"login",cancelable:true,metadata:{kind:"verification",account_id:match[2],summary:"读取目录并测试 "+match[1]}}));});

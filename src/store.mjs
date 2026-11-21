@@ -95,6 +95,7 @@ export class Store {
       if (input.enabled && (!a.models.length || !a.checked_at))
         throw new AppError(409, "请先完成校验并测试");
       a.enabled = input.enabled;
+      if(!a.enabled){a.last_error=null;a.last_verification_error=null;a.quota_error=null;}
       if (a.enabled) a.status = "ready";
     }
     await this.save();

@@ -2,7 +2,7 @@ import {readFile} from 'node:fs/promises';
 export async function browserSyncScript(origin){const url=new URL(origin);const pattern=url.protocol+'//'+url.hostname+'/panel/*';return `// ==UserScript==
 // @name AI Bridge 本机登录同步
 // @namespace ${origin}/
-// @version 0.1.2
+// @version 0.1.3
 // @description 在本机 Google 页面手动登录后，同步至你自己的 AI Bridge；不含第三方接收服务。
 // @match ${pattern}
 // @match https://aistudio.google.com/*

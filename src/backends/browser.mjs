@@ -72,6 +72,6 @@ export class GoogleBrowserPool {
    catch(error){if(!browser.users&&!browser.starting&&this.entries.get(profile)===browser){this.entries.delete(profile);await browser.close();this.notify();}throw error;}
   }
  }
- async checkpoint(profile){const browser=this.entries.get(profile);if(browser&&!browser.users&&!browser.starting){browser.poolClosing=true;await browser.close();this.entries.delete(profile);this.notify();}}
+ async checkpoint(profile,{requireIdle=false}={}){const browser=this.entries.get(profile);if(requireIdle&&browser&&(browser.users||browser.starting))throw new AppError(409,"该账号浏览器仍在使用，请稍后重试","account_busy");if(browser&&!browser.users&&!browser.starting){browser.poolClosing=true;await browser.close();this.entries.delete(profile);this.notify();}}
  async close(){this.closed=true;this.notify();await Promise.allSettled([...this.entries.values()].map(b=>b.close()));this.entries.clear();await this.runtime.close();}
 }
