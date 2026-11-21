@@ -27,7 +27,7 @@ export class AIStudio {
    if([...this.tasks.values()].some(t=>t.state==="running"))throw new AppError(409,"已有 Google 登录在进行");
    for(const [id,t]of this.tasks)if(t.state!=="running")this.tasks.delete(id);
    const task={id:randomUUID(),view:input.view,state:"running",items:[{state:"running",step:"login",label:""}],controller:new AbortController(),clients:new Set()};this.tasks.set(task.id,task);
-   task.work=(async()=>{try{for await(const event of this.engine.run("login",{locale:input.locale||"zh-CN",timezone:input.timezone||"Asia/Shanghai",proxy:input.proxy||"",owner:input.owner,account_id:path!=="/api/accounts"?decodeURIComponent(path.split("/")[3]):null},task.controller.signal)){
+   task.work=(async()=>{try{for await(const event of this.engine.run("login",{locale:input.locale||"zh-CN",timezone:input.timezone||"Asia/Shanghai",proxy:input.proxy||"",owner:input.owner,target:input.target||"aist",account_id:path!=="/api/accounts"?decodeURIComponent(path.split("/")[3]):null},task.controller.signal)){
       task.nativeId=event.native_job;
       if(event.browser_meta){task.lastMeta=event.browser_meta;if(event.browser_meta.type==="status")task.lastStatus=event.browser_meta;if(event.browser_meta.type==="frame")task.frameMeta=event.browser_meta;for(const client of task.clients)if(client.readyState===1&&client.bufferedAmount<1024*1024)client.send(JSON.stringify(event.browser_meta));}
       if(event.browser_binary){const bytes=Buffer.from(event.browser_binary,"base64");if(bytes.length<=1024*1024)task.lastFrame=bytes;for(const client of task.clients)if(client.readyState===1&&client.bufferedAmount<1024*1024)client.send(bytes,{binary:true});}

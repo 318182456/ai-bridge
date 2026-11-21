@@ -18,7 +18,7 @@ test("browser launch is shared, account profiles are isolated and idle reclaims 
 test("Google grants persist privately and refresh once; metadata contains no credential values",async()=>{
  const dir=await mkdtemp(join(tmpdir(),"ai-bridge-grants-test-")),id="g_"+"3".repeat(24);let calls=0;
  const account={id,email:"synthetic@example.invalid",enabled:false,state:"authenticated",grants:{}};const registry=new GoogleAccounts(dir);await registry.put(account);
- const grants=new GoogleGrants(dir,{post:async values=>{calls++;if(values.Token)return{Token:"synthetic-private-refresh-value"};return{Auth:"synthetic-private-access-value",ExpiresIn:"3600"};}});
+ const grants=new GoogleGrants(dir,{post:async values=>{calls++;if(values.Token)return{Token:"synthetic-private-refresh-value",Email:account.email};return{Auth:"synthetic-private-access-value",ExpiresIn:"3600"};}});
  try{await grants.bindRobin(account,"synthetic-one-shot-code");const [a,b]=await Promise.all([grants.robinToken(id),grants.robinToken(id)]);assert.equal(a,b);assert.equal(calls,2);const reloaded=new GoogleGrants(dir,{post:async()=>{throw Error("must use cached token");}});assert.equal(await reloaded.robinToken(id),a);const metadata=JSON.stringify(await registry.list());assert.ok(!metadata.includes("synthetic-private"));assert.ok(!metadata.includes("synthetic-one-shot"));await assert.rejects(grants.read("../escape"),{status:400});}finally{await rm(dir,{recursive:true,force:true});}
 });
 test("AI Studio independent codec preserves binding, signatures, sparse arrays and exact reported usage",()=>{

@@ -1,3 +1,4 @@
+import {authorizeRobin} from "./robin-authorization.mjs";
 import {ManualBrowser} from "./manual-browser.mjs";
 import {join} from "node:path";
 import {randomUUID} from "node:crypto";
@@ -32,9 +33,10 @@ export class BrowserEngine {
   }catch(error){if(signal?.aborted)throw cancelled();throw error;}finally{await desktop.close();this.jobs.delete(id);}
  }
  async *login(id,input,signal){
+  if(input.target==="robin"){if(!input.account_id)throw new AppError(400,"请先选择已有 Google 账号","account_required");const result=yield* authorizeRobin(this,id,input.account_id,signal);yield{result:{account:{id:result.account.id,email:result.account.email,state:result.account.state}},native_job:id};return;}
   const profile=input.account_id||("g_"+randomUUID().replaceAll("-","").slice(0,24));yield{browser_meta:{type:"status",status:"preparing"},native_job:id};
-  const previous=await this.accounts.get(profile).catch(()=>null);let verified=false;await this.browser.checkpoint?.(profile);
-  if(this.manualFactory)try{yield* this.manualLogin(id,profile,"https://aistudio.google.com/prompts/new_chat",signal);}catch(error){if(previous&&this.vault)await this.vault.restore("google",profile,{force:true});throw error;}
+  const previous=await this.accounts.get(profile).catch(()=>null);let verified=false;await this.browser.checkpoint?.(profile);this.vault?.unmark?.("google",profile);
+  if(this.manualFactory)try{yield* this.manualLogin(id,profile,"https://aistudio.google.com/prompts/new_chat",signal);}catch(error){if(previous&&this.vault){await this.vault.restore("google",profile,{force:true});if(Object.values(previous.grants||{}).includes("verified"))this.vault.mark("google",profile);}throw error;}
   const lease=await this.browser.acquire(profile,signal),context=lease.context,page=await context.newPage();const job={page,context,id};this.jobs.set(id,job);let models=[];const detach=this.captureCatalog(page,value=>{models=value;});const abort=()=>page.close().catch(()=>{});signal?.addEventListener("abort",abort,{once:true});
   try{
    yield{browser_meta:{type:"status",status:"starting"},native_job:id};
@@ -60,17 +62,16 @@ export class BrowserEngine {
       verified=true;this.vault?.mark("google",profile);account.enabled=old?old.enabled:true;account.state="ready";account.grants.aist="verified";account.checked_at=new Date().toISOString();await this.accounts.put(account);
       if(!this.manualFactory&&this.authorize)for await(const value of this.authorize({account,context,page,signal,id,owner:input.owner,setPage:p=>{job.page=p;}}))yield value;
       if(this.manualFactory&&this.bindRobin&&account.grants.robin!=="verified"){
-       await context.clearCookies({name:"oauth_token"});await page.close().catch(()=>{});lease.release();await this.browser.checkpoint?.(profile);
-       const robinUrl=new URL("https://accounts.google.com/EmbeddedSetup");robinUrl.search=new URLSearchParams({source:"android",xoauth_display_name:"Android Device",lang:"zh",hl:"zh-CN"}).toString();
-       try{const choice=yield* this.manualLogin(id,profile,robinUrl.href,signal,"manual_robin");if(!choice.skipped){yield{browser_meta:{type:"status",status:"verifying"},native_job:id};const grantLease=await this.browser.acquire(profile,signal);try{const token=(await grantLease.context.cookies("https://accounts.google.com")).find(c=>c.name==="oauth_token")?.value;if(!token)throw new AppError(401,"Google 未返回 Robin 授权结果，可稍后重新授权","robin_authorization_missing");await this.bindRobin(account,token,signal);account.grants.robin="verified";await this.accounts.put(account);}finally{await grantLease.context.clearCookies({name:"oauth_token"}).catch(()=>{});grantLease.release();await this.browser.checkpoint?.(profile);}}}
-       catch(error){account.grants.robin="needs_attention";await this.accounts.put(account);if(signal?.aborted)throw cancelled();yield{browser_meta:{type:"status",status:"partial",message:error instanceof AppError?error.message:"Robin 授权未完成；AI Studio 已保留"},native_job:id};}
+       await page.close().catch(()=>{});lease.release();await this.browser.checkpoint?.(profile);
+       try{const result=yield* authorizeRobin(this,id,profile,signal,{allowSkip:true});Object.assign(account,result.account);}
+       catch(error){if(signal?.aborted)throw cancelled();yield{browser_meta:{type:"status",status:"partial",message:error instanceof AppError?error.message:"Robin 授权未完成；AI Studio 已保留"},native_job:id};}
       }
       yield{result:{account:{id:profile,email,state:account.state}},native_job:id};return;
     }
     yield{browser_meta:{type:"frame",context:id,...(page.viewportSize?.()||{width:1280,height:800})},native_job:id};const bytes=await page.screenshot({type:"jpeg",quality:65,timeout:10000});yield{browser_binary:bytes.toString("base64"),native_job:id};await sleep(180,undefined,{signal});
    }throw new AppError(408,"Google 登录超过十分钟","login_timeout");
   }catch(e){if(signal?.aborted)throw cancelled();if(e instanceof AppError)throw e;throw new AppError(503,"Google 浏览器登录未完成，请重试","browser_login_failed");}
-  finally{detach();this.jobs.delete(id);signal?.removeEventListener("abort",abort);await page.close().catch(()=>{});lease.release();await this.browser.checkpoint?.(profile);if(!verified&&previous&&this.vault)await this.vault.restore("google",profile,{force:true});}
+  finally{detach();this.jobs.delete(id);signal?.removeEventListener("abort",abort);await page.close().catch(()=>{});lease.release();await this.browser.checkpoint?.(profile);if(!verified&&previous&&this.vault){await this.vault.restore("google",profile,{force:true});if(Object.values(previous.grants||{}).includes("verified"))this.vault.mark("google",profile);}}
  }
  async *generate(account,request,signal){
   const model=(account.models||[]).find(m=>m.id===request.model);if(!model)throw new AppError(404,"账号模型目录中没有此模型","model_not_found");

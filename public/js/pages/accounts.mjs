@@ -103,12 +103,13 @@ function renderAccounts() {
           const target = feedbackRow(a.id, "操作失败");
           target.append(text("p", e.message, "status-error"));
         });
-      const primary=label==="刷新额度"||label==="补充授权"||(!a.google&&(label==="启用 agy"||label==="停用 agy"||(label==="登录 agy"&&!a.checked_at)));
+      const primary=label==="刷新额度"||label==="授权 AI Studio"||label==="授权 Robin"||(!a.google&&(label==="启用 agy"||label==="停用 agy"||(label==="登录 agy"&&!a.checked_at)));
       (primary?bar:more).append(b);
       if(["starting","running","submitted","checking"].includes(loginStates.get(a.id))&&label!=="登录 agy")b.disabled=true;
     };
     if(a.google){
-      button("补充授权",()=>googleLogin.begin(a.google.id));
+      button("授权 AI Studio",()=>googleLogin.begin(a.google.id,"aist"));
+      button("授权 Robin",()=>googleLogin.begin(a.google.id,"robin"));
       button(a.google.enabled?"停用 AI Studio / Robin":"启用 AI Studio / Robin",async()=>{await api("/api/backends/aist/accounts/"+a.google.id,{method:"PATCH",data:{enabled:!a.google.enabled}});await refresh();});
     }
     if(a.native){

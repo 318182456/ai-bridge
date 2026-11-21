@@ -1,6 +1,6 @@
 import {note,socketProtocols} from "../core.mjs";
 export function mountGoogleLogin(ctx,{onChange=async()=>{},onOpen=()=>{}}={}){
- const $=ctx.$;let disposed=false,poll=null,socket=null,view=null,frame=null,sequence=0,loading=false,collapsed=false,zoom=1,lastViewportAt=0,touch=null,manualPhase=null,viewportTimer=null;
+ const $=ctx.$;let disposed=false,poll=null,socket=null,view=null,frame=null,sequence=0,loading=false,collapsed=false,zoom=1,lastViewportAt=0,touch=null,manualPhase=null,viewportTimer=null,activeTarget="aist";
  const dialog=$("googleLoginDialog"),browser=$("googleBrowser");
  const setStatus=value=>{$("aistLoginStatus").textContent=value;$("googleConnectPlaceholder").textContent=value;};
  function openDialog(){collapsed=false;if(!dialog.open)dialog.showModal();syncViewport();}
@@ -21,7 +21,7 @@ export function mountGoogleLogin(ctx,{onChange=async()=>{},onOpen=()=>{}}={}){
  $("openGoogleLoginDialog").onclick=openDialog;$("minimizeGoogleLogin").onclick=minimize;dialog.addEventListener("cancel",event=>{event.preventDefault();minimize();});
  $("googleZoomIn").onclick=()=>{zoom=Math.min(2,zoom+.25);applyZoom();};$("googleZoomFit").onclick=()=>{zoom=1;applyZoom();syncViewport();};
 
- function setPhase(value){const manual=["manual","manual_robin"].includes(value.status);$("confirmGoogleLogin").hidden=!manual;$("skipGoogleGrant").hidden=value.status!=="manual_robin";if(manualPhase!==value.status){$("confirmGoogleLogin").disabled=false;$("skipGoogleGrant").disabled=false;}manualPhase=value.status;setStatus(({manual:"请在完整浏览器中登录并进入 AI Studio，然后点击继续验证",manual_robin:"请完成 Robin 的 Google 授权，再继续验证；也可稍后处理",verifying:"已关闭手动浏览器，正在实际验证并保存账号",partial:value.message||"部分授权未完成，请查看账号状态"})[value.status]||({preparing:"准备完整浏览器，首次使用可能需要下载…",starting:"正在启动完整浏览器…",waiting:"请完成 Google 官方授权",saving:"正在验证并保存账号"})[value.status]||"正在登录");}
+ function setPhase(value){const manual=["manual","manual_robin"].includes(value.status);$("confirmGoogleLogin").hidden=!manual;$("skipGoogleGrant").hidden=value.status!=="manual_robin"||activeTarget==="robin";if(manualPhase!==value.status){$("confirmGoogleLogin").disabled=false;$("skipGoogleGrant").disabled=false;}manualPhase=value.status;setStatus(({manual:"请在完整浏览器中登录并进入 AI Studio，然后点击继续验证",manual_robin:"请完成 Robin 的 Google 授权，再继续验证；也可稍后处理",verifying:"已关闭手动浏览器，正在实际验证并保存账号",verifying_robin:"正在实际验证 Robin 并保存授权（消耗一次模型调用）",partial:value.message||"部分授权未完成，请查看账号状态"})[value.status]||({preparing:"准备完整浏览器，首次使用可能需要下载…",starting:"正在启动完整浏览器…",waiting:"请完成 Google 官方授权",saving:"正在验证并保存账号"})[value.status]||"正在登录");}
  $("confirmGoogleLogin").onclick=()=>{if(send({type:"confirm"}))$("confirmGoogleLogin").disabled=true;};$("skipGoogleGrant").onclick=()=>{if(send({type:"skip"}))$("skipGoogleGrant").disabled=true;};
  function closeSocket(){sequence++;socket?.close();socket=null;view=null;frame=null;touch=null;$("googleBrowser").hidden=true;$("googleConnectPlaceholder").hidden=false;const canvas=$("googleCanvas");canvas.getContext("2d").clearRect(0,0,canvas.width,canvas.height);$("googleKeyboard").value="";}
  function send(message){if(socket?.readyState!==WebSocket.OPEN||!frame)return false;socket.send(JSON.stringify({...message,context:frame.context}));return true;}
@@ -57,13 +57,13 @@ export function mountGoogleLogin(ctx,{onChange=async()=>{},onOpen=()=>{}}={}){
    if(loading||disposed)return;loading=true;
    try{const data=await ctx.api("/api/backends/aist/login");if(disposed)return;
      $("aistLoginPanel").hidden=false;if(!collapsed&&!dialog.open)openDialog();
-     const running=["waiting","running"].includes(data.state);$("beginGoogleLogin").disabled=running;$("cancelGoogleLogin").hidden=!running;
+     activeTarget=data.target||activeTarget;$("googleLoginTitle").textContent=activeTarget==="robin"?"Robin · Google 授权":"Google 官方登录";$("googleLoginHelp").textContent=activeTarget==="robin"?"请使用所选账号完成 Google 官方授权，然后继续验证。会调用一次 Robin 模型，不调用 AI Studio。手机输入请点“键盘输入”。":"点击画面选择远端输入框；电脑可直接输入，手机或中文输入请点击“键盘输入”。进入 AI Studio 后继续验证，会实际调用一次模型。";const running=["waiting","running"].includes(data.state);$("beginGoogleLogin").disabled=running;$("cancelGoogleLogin").hidden=!running;
      if(data.state==="waiting")setStatus("等待目标账号空闲或另一项登录结束");
      if(running)onOpen(data.account_id||null);if(data.view)connect(data.view);
      if(!running){closeSocket();clearInterval(poll);setStatus(data.state==="done"?"授权流程已结束，请查看各后端独立验证状态":data.error||"登录已取消");$("confirmGoogleLogin").hidden=true;$("skipGoogleGrant").hidden=true;await onChange();}return running;
    }catch(error){if(error.status!==404)note("aistFeedback",error.message,true);return false;}finally{loading=false;}
  }
- async function begin(account){zoom=1;lastViewportAt=0;applyZoom();openDialog();setStatus("正在创建 Google 登录任务…");$("beginGoogleLogin").disabled=true;try{await ctx.api("/api/backends/aist/login",{method:"POST",data:account?{account_id:account}:{}});const active=await loginState();clearInterval(poll);if(active)poll=setInterval(loginState,1500);}catch(e){setStatus(e.message);$("beginGoogleLogin").disabled=false;note("aistFeedback",e.message,true);}}
+ async function begin(account,target="aist"){activeTarget=target;zoom=1;lastViewportAt=0;applyZoom();openDialog();setStatus("正在创建 Google 登录任务…");$("beginGoogleLogin").disabled=true;try{await ctx.api("/api/backends/aist/login",{method:"POST",data:{target,...(account?{account_id:account}:{})}});const active=await loginState();clearInterval(poll);if(active)poll=setInterval(loginState,1500);}catch(e){setStatus(e.message);$("beginGoogleLogin").disabled=false;note("aistFeedback",e.message,true);}}
  $("beginGoogleLogin").onclick=()=>begin(null);$("cancelGoogleLogin").onclick=async()=>{try{await ctx.api("/api/backends/aist/login",{method:"DELETE",data:{}});await loginState();}catch(e){note("aistFeedback",e.message,true);}};
  return{begin,async resume(){const running=await loginState();if(running){clearInterval(poll);poll=setInterval(loginState,1500);}},cleanup(){disposed=true;clearInterval(poll);clearTimeout(viewportTimer);observer.disconnect();window.visualViewport?.removeEventListener("resize",syncViewport);closeSocket();if(dialog.open)dialog.close();}};
 }

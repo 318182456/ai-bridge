@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends xauth x11-apps 
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 LABEL org.opencontainers.image.title="AI Bridge" \
       org.opencontainers.image.source="https://github.com/318182456/ai-bridge" \
-      org.opencontainers.image.version="0.4.0-alpha.10"
+      org.opencontainers.image.version="0.4.0-alpha.11"
 WORKDIR /app
 COPY --chown=node:node package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts

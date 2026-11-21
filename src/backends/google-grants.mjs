@@ -15,6 +15,8 @@ export class GoogleGrants {
   const old=await this.read(account.id),androidId=old.robin?.android_id||randomBytes(8).toString("hex");
   const values=await this.post({accountType:"HOSTED_OR_GOOGLE",Email:account.email,has_permission:"1",source:"android",androidId,service:"ac2dm",add_account:"1",ACCESS_TOKEN:"1",Token:oauthToken,client_sig:"38918a453d07199354f8b19af05ec6562ced5788"},{signal});
   if(!values.Token)throw new AppError(401,"Google 未授予 Robin 访问权限","robin_authorization_failed");
+  // Bind the returned Google subject to the selected account; never silently relabel another identity.
+  if(typeof values.Email!=="string"||values.Email.toLowerCase()!==account.email.toLowerCase())throw new AppError(409,"Google 授权身份与所选账号不一致，请选择该账号重新授权","account_identity_mismatch");
   old.robin={email:account.email,android_id:androidId,master_token:values.Token};await this.save(account.id,old);return this.robinToken(account.id,signal);
  }
  async robinToken(id,signal){
