@@ -14,7 +14,9 @@ export class GoogleGrants {
  async bindRobin(account,oauthToken,signal){
   if(typeof oauthToken!=="string"||!oauthToken||oauthToken.length>16384)throw new AppError(400,"Google 未返回有效的 Robin 授权","robin_authorization_missing");
   const old=await this.read(account.id),androidId=old.robin?.android_id||randomBytes(8).toString("hex");
-  const values=await this.post({accountType:"HOSTED_OR_GOOGLE",Email:account.email,has_permission:"1",source:"android",androidId,service:"ac2dm",add_account:"1",ACCESS_TOKEN:"1",Token:oauthToken,client_sig:"38918a453d07199354f8b19af05ec6562ced5788"},{signal});
+  // Explicitly accepted gpsoauth compatibility placeholder; this is not genuine device attestation.
+  // Keep token acceptance and exact Google-returned identity mandatory (ASVS 16.5.3).
+  const values=await this.post({accountType:"HOSTED_OR_GOOGLE",Email:account.email,has_permission:"1",source:"android",androidId,service:"ac2dm",add_account:"1",ACCESS_TOKEN:"1",Token:oauthToken,droidguard_results:"dummy123",client_sig:"38918a453d07199354f8b19af05ec6562ced5788"},{signal});
   if(!values.Token)throw new AppError(401,"Google 未授予 Robin 访问权限","robin_authorization_failed");
   // Bind the returned Google subject to the selected account; never silently relabel another identity.
   if(typeof values.Email!=="string"||values.Email.toLowerCase()!==account.email.toLowerCase())throw new AppError(409,"Google 授权身份与所选账号不一致，请选择该账号重新授权","account_identity_mismatch");

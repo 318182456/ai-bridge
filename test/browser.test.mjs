@@ -51,34 +51,13 @@ test("browser pool shares a profile across requests and keeps login/other profil
 });
 
 
-test("failed Google reauthorization preserves the last verified account metadata",async()=>{
- const {BrowserEngine}=await import('../src/backends/browser-engine.mjs');const {AppError}=await import('../src/common.mjs');
- const root=await mkdtemp(join(tmpdir(),'ai-bridge-relogin-')),accounts=new GoogleAccounts(root),id='g_'+'4'.repeat(24);
- const old={id,email:'synthetic@example.invalid',enabled:true,state:'ready',checked_at:'2026-01-01T00:00:00.000Z',models:[{id:'old-model'}],grants:{aist:'verified',agy:'verified',robin:'verified'}};
- await accounts.put(structuredClone(old));let releases=0,closes=0;
- const page={screenshot:async()=>Buffer.from('synthetic-frame'),goto:async()=>{},url:()=> 'https://aistudio.google.com/prompts/new_chat',locator:()=>({isVisible:async()=>true}),close:async()=>{closes++;}};
- const engine=new BrowserEngine({accounts,browser:{checkpoint:async()=>{},acquire:async()=>({context:{newPage:async()=>page},release:()=>releases++})}});
- engine.email=async()=>old.email;engine.captureCatalog=(_page,receive)=>{receive([{id:'new-flash',capabilities:[1]}]);return()=>{};};
- engine.generate=async function*(){throw new AppError(503,'Synthetic network failure','network_error');};
- try{await assert.rejects(async()=>{for await(const _ of engine.login('synthetic-job',{account_id:id},new AbortController().signal)){};},{code:'network_error'});assert.deepEqual(await accounts.get(id),old);assert.equal(releases,1);assert.equal(closes,1);}
+test("failed deferred Cookie preparation preserves verified metadata and sanitizes navigation errors",async()=>{
+ const {BrowserEngine}=await import('../src/backends/browser-engine.mjs');
+ const root=await mkdtemp(join(tmpdir(),'ai-bridge-cookie-prepare-')),accounts=new GoogleAccounts(root),id='g_'+'4'.repeat(24);
+ const old={id,email:'synthetic@example.invalid',cookie_revision:'one',enabled:true,state:'ready',checked_at:'2026-01-01T00:00:00.000Z',models:[{id:'old-model'}],grants:{aist:'verified',agy:'verified',robin:'verified'}};
+ await accounts.put(structuredClone(old));let releases=0,closes=0,restores=0;
+ const page={route:async()=>{},goto:async()=>{throw Error('synthetic-private-navigation-url');},close:async()=>{closes++;}};
+ const engine=new BrowserEngine({accounts,vault:{unmark(){},mark(){},restore:async()=>{restores++;}},browser:{checkpoint:async()=>{},acquire:async()=>({context:{newPage:async()=>page,clearCookies:async()=>{},addCookies:async()=>{}},release:()=>releases++})}});engine.captureCatalog=()=>()=>{};
+ try{await assert.rejects(engine.prepareCookies(old,{revision:'one',cookies:[{name:'SID',value:'synthetic',domain:'.google.com'},{name:'SAPISID',value:'synthetic',domain:'.google.com'}]}),e=>e.code==='google_import_page_failed'&&!e.message.includes('synthetic-private'));assert.deepEqual(await accounts.get(id),old);assert.equal(releases,1);assert.equal(closes,1);assert.equal(restores,1);}
  finally{await rm(root,{recursive:true,force:true});}
-});
-
-
-test("Google login emits a real frame before navigation and returns a safe network error",async()=>{
- const {BrowserEngine}=await import('../src/backends/browser-engine.mjs');const root=await mkdtemp(join(tmpdir(),'ai-bridge-first-frame-')),accounts=new GoogleAccounts(root);let navigated=false,released=false;
- const page={screenshot:async()=>Buffer.from('synthetic-frame'),goto:async(_url,opts)=>{assert.equal(opts.waitUntil,'commit');navigated=true;const error=new Error('synthetic-private-navigation-url');error.name='TimeoutError';throw error;},close:async()=>{}};
- const engine=new BrowserEngine({accounts,browser:{acquire:async()=>({context:{newPage:async()=>page},release:()=>{released=true;}})}});engine.captureCatalog=()=>()=>{};const iterator=engine.login('test',{},new AbortController().signal);
- try{await iterator.next();await iterator.next();await iterator.next();const image=await iterator.next();assert.equal(navigated,false);assert.equal(Buffer.from(image.value.browser_binary,'base64').toString(),'synthetic-frame');await assert.rejects(iterator.next(),e=>e.code==='google_page_timeout'&&!e.message.includes('synthetic-private'));assert.equal(released,true);}
- finally{await iterator.return();await rm(root,{recursive:true,force:true});}
-});
-
-
-test("login viewport follows the owner window within bounded dimensions and pointer coordinates",async()=>{
- const {BrowserEngine}=await import('../src/backends/browser-engine.mjs');let size={width:1280,height:800};const moves=[],sizes=[];
- const page={viewportSize:()=>size,setViewportSize:async next=>{size=next;sizes.push(next);},mouse:{move:async(x,y)=>moves.push([x,y])}};
- const engine=new BrowserEngine({accounts:{},browser:{}}),job={page};engine.jobs.set('owned',job);
- engine.input('owned',{type:'viewport',context:'foreign',width:390,height:640});engine.input('owned',{type:'viewport',context:'owned',width:99999,height:640});
- engine.input('owned',{type:'viewport',context:'owned',width:390,height:640});engine.input('owned',{type:'pointer',context:'owned',action:'move',x:9999,y:9999});await job.inputs;
- assert.deepEqual(sizes,[{width:390,height:640}]);assert.deepEqual(moves,[[389,639]]);
 });

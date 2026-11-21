@@ -8,11 +8,9 @@ import {AuthVault} from "./storage/auth-vault.mjs";
 import {BrowserEngine} from "./backends/browser-engine.mjs";
 import {modelCatalog,publicModels} from "./backends/catalog.mjs";
 import {GoogleGrants} from "./backends/google-grants.mjs";
-import {GoogleAuthorization} from "./backends/authorization.mjs";
 import {GoogleAccounts} from "./backends/google-store.mjs";
 import {Robin} from "./backends/robin.mjs";
-import {BackendAccounts,registerBackendAccounts} from "./backends/accounts.mjs";
-import {Upgrades} from "./runtime/upgrades.mjs";
+import {registerBackendAccounts} from "./backends/accounts.mjs";
 import {AIStudio} from "./backends/aist.mjs";
 import {registerAIStudio} from "./backends/routes.mjs";
 import {Backends,registerBackends} from "./backends/registry.mjs";
@@ -127,11 +125,8 @@ export async function createApplication(options = {}) {
   const backends=new Backends();
   const googleAccounts=new GoogleAccounts(dataDir,storage),googleGrants=new GoogleGrants(dataDir,{storage});
   if(options.aistudio)backends.register("aist",options.aistudio);
-  else backends.register("aist",new AIStudio({dataDir,logger,engine:new BrowserEngine({root:dataDir,logger,accounts:googleAccounts,vault:authVault,credentialProvider:async id=>(await googleGrants.read(id)).aist,bindRobin:async(account,token,signal)=>{const before=await googleGrants.read(account.id);try{await googleGrants.bindRobin(account,token,signal);const robin=backends.get("robin");robin.cache.delete(account.id);await robin.verify(account,signal);return()=>googleGrants.save(account.id,before);}catch(error){await googleGrants.save(account.id,before);throw error;}}})}));
+  else backends.register("aist",new AIStudio({dataDir,logger,engine:new BrowserEngine({root:dataDir,logger,accounts:googleAccounts,vault:authVault,credentialProvider:async id=>(await googleGrants.read(id)).aist})}));
   backends.register("robin",options.robin||new Robin({dataDir,logger,accounts:googleAccounts,tokenProvider:id=>googleGrants.robinToken(id)}));
-  const googleAuthorization=new GoogleAuthorization({accounts:googleAccounts,grants:googleGrants,store,loginManager,robin:backends.get("robin")});
-  if(!options.aistudio)backends.get("aist").engine.authorize=googleAuthorization.authorize.bind(googleAuthorization);
-  const backendAccounts=new BackendAccounts({backends,queue,sessions,logger});
   const browserSync=new BrowserSync({auth,accounts:googleAccounts,queue,logger,process:options.browserSyncProcess|| ((input,signal)=>syncBrowserCredential({accounts:googleAccounts,grants:googleGrants},input,signal))});
   backends.register("agy",{status:()=>({state:"managed",active_requests:queue.running}),close:async()=>{}});
   async function perform(params, signal, context={}) {
@@ -199,7 +194,7 @@ export async function createApplication(options = {}) {
   registerSessions({register,send,sessions});
   registerQueue({register,send,queue});
   registerBackends({register,send,backends});
-  registerBackendAccounts({register,send,body,backends,accounts:backendAccounts,owner:sessionOwner});
+  registerBackendAccounts({register,send,body,backends});
   registerBrowserSync({register,send,body,auth,sync:browserSync,script:browserSyncScript});
   registerGoogleAccounts({register,send,body,accounts:googleAccounts,store,queue,sync:browserSync,browser:backends.get("aist").engine?.browser||{}});
   const aistChat=registerAIStudio({register,body,send,backends,queue,store,logger});
@@ -222,8 +217,7 @@ export async function createApplication(options = {}) {
     async ({ req, res, principal }) => {
       if (loginManager.current?.owner === principal.token) loginManager.close();
       tasks.closeOwner(sessionOwner(principal));
-      backendAccounts.closeOwner(sessionOwner(principal));browserSync.closeOwner(sessionOwner(principal));
-      upgrades.closeOwner(principal.token);
+      browserSync.closeOwner(sessionOwner(principal));
       await sessions.closeWhere(s => s.owner === sessionOwner(principal));
       auth.sessions.delete(principal.token);
       res.setHeader(
@@ -601,11 +595,6 @@ export async function createApplication(options = {}) {
       else send(res, value, status === 499 ? 408 : status);
     }
   });
-  const upgrades=new Upgrades({server,auth});
-  upgrades.register(/^\/api\/backends\/aist\/login-view\/([a-f0-9-]{36})$/,async({principal,match,signal})=>{
-    backendAccounts.authorizeView(sessionOwner(principal),match[1]);
-    return backends.get("aist").loginSocket(match[1],signal);
-  });
   server.requestTimeout = 30000;
   server.headersTimeout = 10000;
   return {
@@ -619,14 +608,13 @@ export async function createApplication(options = {}) {
     sessions,
     tasks,
     backends,
-    backendAccounts,browserSync,
-    upgrades,
+    browserSync,
     logger,
-    catalog: [...upgrades.catalog(),...routes.map(({ method, path, access }) => ({
+    catalog: routes.map(({ method, path, access }) => ({
       method,
       path: String(path),
       access,
-    }))],
+    })),
   };
 }
 if (
@@ -640,8 +628,7 @@ if (
   );
   const close = () => {
     app.tasks.close();
-    app.backendAccounts.close();app.browserSync.close();
-    app.upgrades.close();
+    app.browserSync.close();
     app.loginManager.close();
     app.server.close();
     Promise.all([app.browserSync.close(),app.store.pending, app.backends.close(), app.runner.close()]).then(()=>app.authVault?.close()).then(()=>app.storage?.close()).finally(() =>

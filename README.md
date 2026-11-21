@@ -4,7 +4,7 @@
 
 ## 当前开发状态
 
-当前发布版 `0.4.0-alpha.15` 已提供 Docker 镜像与 amd64/arm64 原生 Linux 安装包。账号列表默认通过配套脚本在本机浏览器登录 AIST / Robin；NAS 完整浏览器登录作为兼容入口保留：登录期间由独立 Chromium 显示真实地址栏，用户手动操作；不使用 Playwright、CDP 或自动填写 Google 登录表单。完成 AI Studio 登录后点击“已完成登录，继续验证”，程序关闭完整浏览器，再读取模型并实际生成验证。账号列表中的“本机登录 Robin”或更多操作中的“NAS 授权 Robin”可直接复用已有 Google 身份进入 Robin 授权，不依赖 AI Studio 生成成功；完成后单独调用一次 Robin 模型验证。两个后端独立显示授权状态。agy 沿用已有官方 CLI 登录入口。
+当前发布版 `0.4.0-alpha.16` 提供 Docker 镜像与 amd64/arm64 原生 Linux 安装包。AIST / Robin 仅通过本机浏览器和配套脚本同步凭据；NAS 远程 Google 登录、画面传输与桌面控制已移除。agy 保留官方 CLI 的独立登录和一次性授权码流程。各后端分别记录授权与启停状态，同步完成不代表生成权限已通过。
 
 同一 Google 身份可以复用浏览器登录资料，但各产品权限并不等价。Google 仍可能拒绝账号、地区或浏览器；只有实际验证成功才显示对应后端已就绪，界面与模拟测试通过不代表 Google 接受真实登录。
 
@@ -19,11 +19,11 @@
 
 ## 资源与部署
 
-三个后端共享模型并发预算，默认 1；登录使用独立位置，仅锁定目标账号。浏览器按需下载、启动，模型浏览器池最多两个账号资料目录，空闲约两分钟回收。完整浏览器和私有 Xvfb 仅在手动登录期间运行，关闭后释放；截图只在当前受保护会话中传输。模型目录读取使用缓存，不启动浏览器。实际进程树消耗尚未测量，不提供未经测量的 VPS 内存承诺。
+三个后端共享模型并发预算，默认 1；agy 登录使用独立位置，仅锁定目标账号。AIST 后台浏览器按需下载、启动，最多两个账号资料目录，空闲约两分钟回收；不提供交互登录、截图或远程控制。Robin 不需要浏览器进程。模型目录优先读取缓存，首次 AIST 目录查询或调用会按需应用已同步 Cookie。实际进程树消耗尚未测量，不提供未经测量的 VPS 内存承诺。
 
 Docker 使用版本化 GHCR 镜像；原生 Linux 发行包包含 Node.js 与经 SHA-256 校验的官方 CLI，不在 VPS 编译源码。`scripts/install.sh --version VERSION` 面向 Debian/Ubuntu + systemd、amd64/arm64；发布后从同一 GitHub Release 获取对应架构包及校验文件。配置 `/etc/ai-bridge/ai-bridge.env`，数据 `/var/lib/ai-bridge`，程序 `/opt/ai-bridge`，更新保留配置和数据。
 
-Chromium 默认启用沙盒；部署主机需支持其系统运行依赖与用户命名空间。首个 Google 登录需要下载浏览器且可能较慢。授权资料和 API 密钥均在受限数据目录内，不能提交 Git、放入截图或原始日志。
+Chromium 默认启用沙盒；部署主机需支持其系统运行依赖与用户命名空间。首次 AIST 模型目录查询或调用可能需要下载后台浏览器，因此较慢。授权资料和 API 密钥均在受限数据目录内，不能提交 Git、放入截图或原始日志。
 
 已有 NAS 部署保持 `/volume1/docker/agy-docker/data` 的原挂载和现有域名，应用改名不应创建空数据目录。新镜像通过 CI 构建，更新前检查任务队列并备份配置与状态；不在 NAS 本地编译。
 
@@ -38,7 +38,7 @@ Chromium 默认启用沙盒；部署主机需支持其系统运行依赖与用�
 
 ## 群晖安装
 
-项目路径建议 `/volume1/docker/agy-docker`。需要 Container Manager 与 Docker Compose v2；支持 amd64/arm64。镜像固定官方 CLI 1.5.3，并核对官方发布产物 SHA-256。镜像包含按需运行的 Chromium 与私有 Xvfb，不提供公开桌面端口。
+项目路径建议 `/volume1/docker/agy-docker`。需要 Container Manager 与 Docker Compose v2；支持 amd64/arm64。镜像固定官方 CLI 1.5.3，并核对官方发布产物 SHA-256。镜像包含 AIST 按需运行的后台 Chromium，不包含远程桌面工具。
 
 生产环境直接拉取版本镜像，不需要 Node、Git 或本地编译。将 `compose.yaml` 和 `.env.example` 放入项目目录，复制 `.env.example` 为 `.env`，填写两个不同的长随机密码：`ADMIN_PASSWORD` 和 `API_KEY`。
 
@@ -53,7 +53,7 @@ docker compose up -d
 
 | 变量 | 默认/用途 |
 | --- | --- |
-| `IMAGE_TAG` | `0.4.0-alpha.15`，发布版本；按需升级 |
+| `IMAGE_TAG` | `0.4.0-alpha.16`，发布版本；按需升级 |
 | `ADMIN_PASSWORD` | 管理页登录密码，至少20字符 |
 | `API_KEY` | 客户端Bearer密钥，至少20字符，须与管理密码不同 |
 | `PORT` / `BIND_ADDRESS` | `18861` / `0.0.0.0`，宿主机访问入口 |
@@ -194,15 +194,15 @@ NAS模板保留共享SSO入口、代理和postgres-network，删除冗余hostnam
 
 授权快照只保留账号资料，排除 agy 下载的二进制、会话正文、运行日志、内置插件和缓存；这些工作文件继续在本地按需生成，避免每次认证同步重复传输。
 
-Google 登录使用 Chromium 时，配置了上游代理则以 HTTP/1.1 连接，兼容部分认证 CONNECT 代理的 HTTP/2 停滞问题；TLS 校验和沙盒保持启用，Robin 自身的 HTTP/2 协议不受影响。登录页在连接前显示画面，连接超时或代理错误在当前面板给出原因。
+AIST 后台 Chromium 配置了上游代理时使用 HTTP/1.1，兼容部分认证 CONNECT 代理的 HTTP/2 停滞问题；TLS 校验和沙盒保持启用，Robin 自身的 HTTP/2 协议不受影响。
 
-Google 登录在独立弹窗中显示，可收起后继续、放大或适应窗口；手机采用全屏和响应式远程视口。Docker 与原生安装器包含 Noto CJK 字体，避免中文、日文等字符显示成方块。
+Google 登录仅在用户本机浏览器中进行，管理页就近显示同步进度。Docker 与原生安装器保留 AIST 后台 Chromium 及 Noto CJK 字体，移除 Xvfb、X11 截屏与输入控制工具。升级保留既有账号与凭据资料，不删除历史浏览器目录。
 
 ### 本机浏览器登录 AIST / Robin
 
 在“账号与额度”点击“本机登录 AIST”或“本机登录 Robin”，Google 页面会在操作管理页的本机浏览器打开。首次使用先安装该管理页提供的同步脚本，并刷新管理页。新增账号先填写 Google 邮箱；已有账号必须匹配原有 Google 身份。
 
-建议使用支持 HttpOnly Cookie 的 Tampermonkey Beta，在扩展设置中允许 Cookie API 读取 HttpOnly。普通网页无法读取跨站登录 Cookie；不支持的手机脚本管理器请使用 NAS 远程登录。官方限制见 [Tampermonkey Cookie API 文档](https://www.tampermonkey.net/documentation.php?locale=en&q=GM_cookie)。
+建议使用支持 HttpOnly Cookie 的 Tampermonkey Beta，在扩展设置中允许 Cookie API 读取 HttpOnly。普通网页无法读取跨站登录 Cookie；不支持完整 Cookie API 的手机脚本管理器请改用兼容的桌面浏览器。官方限制见 [Tampermonkey Cookie API 文档](https://www.tampermonkey.net/documentation.php?locale=en&q=GM_cookie)。
 
 完成 Google 登录后，在 Google 页右下角脚本面板点击“登录完成，安全同步”，再回管理页查看结果。AIST 同步 Google 会话 Cookie，Robin 同步该授权过程产生的 oauth_token；AIST 仅在数据库私有凭据中保存 Cookie，登录时不启动 NAS 浏览器、不读取模型、不测试生成。Robin 仅将一次性授权结果交换成可续用的凭据，不发送测试消息。界面分别显示“Cookie 已同步”或“已授权 · 待首次调用”。主动查询模型或首次调用时按需读取模型目录；AIST 会核对所选 Google 身份，首次真实调用成功后才标记已验证。脚本无需管理员密码或长期 API 密钥，不向原 Catie 服务发送内容。
 
@@ -210,4 +210,4 @@ Google 登录在独立弹窗中显示，可收起后继续、放大或适应窗�
 
 账号行的 AIST 与 Robin 可独立启停。Google-only 账号可点击“登录 agy”，明确关联已有 agy 账号或新建后通过官方 CLI 登录；Cookie 不代替 agy 授权。“删除 Google 账号记录”只移除管理记录，保留登录资料和关联的 agy 账号；确认提示会在当前行说明范围。Robin 登录仅交换主凭据，访问令牌在首次使用时获取；错误区分首次交换/访问令牌阶段，不自动测试模型或重复提交一次性授权。
 
-Robin 的 `MissingDroidguard` 表示当前授权流程未满足 Google 的设备验证要求，仅保存 Cookie 不代表授权完成。程序会明确报告此错误，保留失败状态，不自动填入虚构设备证明。AIST 的模型目录可读取也不代表 GenerateContent 具备生成权限，需以实际调用结果为准。
+Robin 的 `MissingDroidguard` 表示当前授权流程未满足 Google 的设备验证要求，仅保存 Cookie 不代表授权完成。首次交换采用 gpsoauth 参考实现的固定兼容占位值 `droidguard_results=dummy123`，它不是真实设备证明，也不代表 Google 已接受授权。仍须由 Google 返回主凭据和匹配的账号身份；若 Google 拒绝或要求有效设备证明，保留失败状态，不自动重试。AIST 的模型目录可读取也不代表 GenerateContent 具备生成权限，需以实际调用结果为准。

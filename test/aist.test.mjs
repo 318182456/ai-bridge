@@ -65,5 +65,5 @@ test("HTTP independent requests on one account execute concurrently within the m
  const request=()=>fetch(base+'/v1/chat/completions',{method:'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json'},body:JSON.stringify({model:'gemini-test',account_id:a.id,messages:[{role:'user',content:'synthetic independent'}]})});
  const pending=[request(),request()];
  try{for(let i=0;i<100&&active<2;i++)await new Promise(r=>setTimeout(r,10));assert.equal(active,2);assert.equal(peak,2);release();const replies=await Promise.all(pending);for(const r of replies){assert.equal(r.status,200);assert.equal((await r.json()).choices[0].message.content,'synthetic answer');}assert.equal(app.store.get(a.id).successes,2);}
- finally{release();await Promise.allSettled(pending);app.tasks.close();app.upgrades.close();app.loginManager.close();await app.backends.close();await runner.close();app.server.closeAllConnections();await new Promise(r=>app.server.close(r));await app.store.pending;await rm(dir,{recursive:true,force:true});}
+ finally{release();await Promise.allSettled(pending);app.tasks.close();app.loginManager.close();await app.backends.close();await runner.close();app.server.closeAllConnections();await new Promise(r=>app.server.close(r));await app.store.pending;await rm(dir,{recursive:true,force:true});}
 });

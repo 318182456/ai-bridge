@@ -1,19 +1,11 @@
 import {mountBrowserSync} from "../components/browser-sync.mjs";
 import {accountDirectory} from "../components/account-directory.mjs";
-import {mountGoogleLogin} from "../components/google-login.mjs";
 import {el,number as count,fmtDate,note} from "../core.mjs";
 export function mount(ctx){
   const $=ctx.$,text=el,api=ctx.api,refresh=()=>ctx.refresh();
   let state=ctx.state,active=true,quotaLoop=false,resumed=false,shared=[];
   const selected=new Set(),expanded=new Map(),panels=new Map(),loginPanels=new Map(),loginStates=new Map(),timers=new Set();
   const directory=()=>accountDirectory(state.accounts,shared);
-  const googlePanel=$("aistLoginPanel");
-  function locateGoogle(id){
-    const account=directory().find(a=>a.google?.id===id);
-    if(account){if(googlePanel.parentElement===panels.get(account.id))return;const cell=feedbackRow(account.id,"Google 授权");cell.append(googlePanel);}
-    else{$("addAccountPanel").hidden=false;$("googleAddHost").append(googlePanel);}
-  }
-  const googleLogin=mountGoogleLogin(ctx,{onChange:refresh,onOpen:locateGoogle});
   const localPanel=$("browserSyncPanel"),localLogin=mountBrowserSync(ctx,{onChange:refresh,onOpen:id=>{const a=directory().find(a=>a.google?.id===id);if(a){if(localPanel.parentElement===panels.get(a.id))return;feedbackRow(a.id,"本机浏览器登录").append(localPanel);}else{$("addAccountPanel").hidden=false;$("googleAddHost").append(localPanel);}}});
   function visibleAccounts(){
     const query=$("accountSearch").value.trim().toLowerCase(),status=$("accountStatus").value;
@@ -113,8 +105,6 @@ function renderAccounts() {
     if(a.google){
       button("本机登录 AIST",()=>localLogin.begin(a.google.id,"aist"));
       button("本机登录 Robin",()=>localLogin.begin(a.google.id,"robin"));
-      button("NAS 授权 AIST",()=>googleLogin.begin(a.google.id,"aist"));
-      button("NAS 授权 Robin",()=>googleLogin.begin(a.google.id,"robin"));
       for(const [id,label]of [["aist","AIST"],["robin","Robin"]]){const enabled=a.google.backend_enabled?.[id]??a.google.enabled,authorized=["verified","authenticated",...(id==="aist"?["synced"]:[])].includes(a.google.grants?.[id]);const toggle=button((enabled&&authorized?"停用 ":"启用 ")+label,async()=>{await api("/api/backends/aist/accounts/"+a.google.id,{method:"PATCH",data:{backend:id,enabled:!enabled}});await refresh();});if(!authorized){toggle.disabled=true;toggle.title="请先完成此后端的凭据同步或授权";}}
       if(!a.native)button("登录 agy",async()=>{
         const cell=feedbackRow(a.id,"关联账号并登录官方 agy");cell.append(text("p","AIST / Robin Cookie 不能代替 agy 登录。请明确选择已有 agy 账号或新建，再完成官方 CLI 授权。","muted"));const choose=document.createElement("select");choose.setAttribute("aria-label","选择 agy 账号");choose.add(new Option("请选择已有账号或新建",""));choose.add(new Option("新建 agy 账号","new"));for(const native of state.accounts)choose.add(new Option(native.name+" · "+(native.status==="ready"?"已登录":"待登录"),native.id));const save=text("button","关联并登录 agy");save.disabled=true;choose.onchange=()=>save.disabled=!choose.value;save.onclick=async()=>{save.disabled=true;try{const r=await api("/api/backends/aist/accounts/"+a.google.id+"/agy",{method:"POST",data:choose.value==="new"?{create:true}:{native_account_id:choose.value}});await refresh();const native=state.accounts.find(n=>n.id===r.account_id);if(!native)throw Error("关联的 agy 账号已不存在，请重新选择");if(native.status==="ready"){feedbackRow(native.id,"agy 账号已登录").append(text("p","已关联选定的 agy 账号，可以直接使用；需要更换登录时点击登录 agy。","muted"));}else await showLogin(native);}catch(e){const target=directory().find(n=>n.google?.id===a.google.id)?.id||a.id;feedbackRow(target,"agy 登录未开始").append(text("p",e.message,"status-error"));}};cell.append(choose,save);
@@ -406,7 +396,7 @@ async function showLogin(a,resume=false){
 
 }
 
-  $("showAddAccount").onclick=()=>{$("addAccountPanel").hidden=false;$("beginGoogleLogin").focus();};
+  $("showAddAccount").onclick=()=>{$("addAccountPanel").hidden=false;$("localGoogleEmail").focus();};
   $("cancelAddAccount").onclick=()=>{$("addAccountPanel").hidden=true;};
   $("cancelLegacyAdd").onclick=()=>{$("addAccountPanel").hidden=true;};
   $("addForm").onsubmit=async event=>{event.preventDefault();try{
@@ -424,8 +414,8 @@ async function showLogin(a,resume=false){
   return {async render(){
     state=ctx.state;shared=(await api("/api/backends/aist/accounts")).accounts||[];renderAccounts();selectionInfo();$("accountCount").textContent=visibleAccounts().length+" / "+directory().length;
     ensureQuotas();
-    if(!resumed){resumed=true;await googleLogin.resume();localLogin.resume();const id=sessionStorage.getItem("agy.lastLogin"),a=state.accounts.find(x=>x.id===id);
+    if(!resumed){resumed=true;localLogin.resume();const id=sessionStorage.getItem("agy.lastLogin"),a=state.accounts.find(x=>x.id===id);
       if(a){const view=await api("/api/accounts/"+id+"/login");if(view.state!=="idle")showLogin(a,true);}
     }
-  },cleanup(){active=false;googleLogin.cleanup();localLogin.cleanup();for(const timer of timers)clearTimeout(timer);}};
+  },cleanup(){active=false;localLogin.cleanup();for(const timer of timers)clearTimeout(timer);}};
 }
