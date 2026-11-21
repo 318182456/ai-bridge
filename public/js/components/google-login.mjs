@@ -1,12 +1,22 @@
 import {note,socketProtocols} from "../core.mjs";
 export function mountGoogleLogin(ctx,{onChange=async()=>{},onOpen=()=>{}}={}){
- const $=ctx.$;let disposed=false,poll=null,socket=null,view=null,frame=null,sequence=0,loading=false,collapsed=false,zoom=1,lastViewportAt=0,touch=null,manualPhase=null;
+ const $=ctx.$;let disposed=false,poll=null,socket=null,view=null,frame=null,sequence=0,loading=false,collapsed=false,zoom=1,lastViewportAt=0,touch=null,manualPhase=null,viewportTimer=null;
  const dialog=$("googleLoginDialog"),browser=$("googleBrowser");
  const setStatus=value=>{$("aistLoginStatus").textContent=value;$("googleConnectPlaceholder").textContent=value;};
  function openDialog(){collapsed=false;if(!dialog.open)dialog.showModal();syncViewport();}
  function minimize(){collapsed=true;dialog.close();$("openGoogleLoginDialog").focus();}
  function applyZoom(){ $("googleCanvas").style.width=(100*zoom)+"%";$("googleZoomLabel").textContent=Math.round(zoom*100)+"%";}
- function syncViewport(){if(!frame||!dialog.open||browser.hidden)return;const width=Math.max(frame.min_width||320,Math.min(1920,Math.floor(browser.clientWidth))),height=Math.max(frame.min_height||240,Math.min(1200,Math.floor(browser.clientHeight)));if((frame.width!==width||frame.height!==height)&&Date.now()-lastViewportAt>600){lastViewportAt=Date.now();send({type:"viewport",width,height});}}
+ function syncViewport(){
+  dialog.style.setProperty("--google-viewport-height",Math.floor(window.visualViewport?.height||innerHeight)+"px");
+  if(!frame||!dialog.open||browser.hidden)return;
+  const availableWidth=Math.max(1,browser.clientWidth),availableHeight=Math.max(1,browser.clientHeight);
+  const width=Math.max(frame.min_width||320,Math.min(frame.max_width||1920,Math.floor(availableWidth)));
+  // Match the visible area's aspect ratio after scaling a minimum-width desktop on phones.
+  const scale=Math.min(1,availableWidth/width),height=Math.max(frame.min_height||240,Math.min(frame.max_height||1200,Math.round(availableHeight/scale)));
+  if(frame.width!==width||frame.height!==height){const wait=600-(Date.now()-lastViewportAt);clearTimeout(viewportTimer);if(wait>0)viewportTimer=setTimeout(syncViewport,wait+10);else{lastViewportAt=Date.now();send({type:"viewport",width,height});}}
+ }
+ window.visualViewport?.addEventListener("resize",syncViewport);
+
  const observer=new ResizeObserver(syncViewport);observer.observe(browser);
  $("openGoogleLoginDialog").onclick=openDialog;$("minimizeGoogleLogin").onclick=minimize;dialog.addEventListener("cancel",event=>{event.preventDefault();minimize();});
  $("googleZoomIn").onclick=()=>{zoom=Math.min(2,zoom+.25);applyZoom();};$("googleZoomFit").onclick=()=>{zoom=1;applyZoom();syncViewport();};
@@ -55,5 +65,5 @@ export function mountGoogleLogin(ctx,{onChange=async()=>{},onOpen=()=>{}}={}){
  }
  async function begin(account){zoom=1;lastViewportAt=0;applyZoom();openDialog();setStatus("正在创建 Google 登录任务…");$("beginGoogleLogin").disabled=true;try{await ctx.api("/api/backends/aist/login",{method:"POST",data:account?{account_id:account}:{}});const active=await loginState();clearInterval(poll);if(active)poll=setInterval(loginState,1500);}catch(e){setStatus(e.message);$("beginGoogleLogin").disabled=false;note("aistFeedback",e.message,true);}}
  $("beginGoogleLogin").onclick=()=>begin(null);$("cancelGoogleLogin").onclick=async()=>{try{await ctx.api("/api/backends/aist/login",{method:"DELETE",data:{}});await loginState();}catch(e){note("aistFeedback",e.message,true);}};
- return{begin,async resume(){const running=await loginState();if(running){clearInterval(poll);poll=setInterval(loginState,1500);}},cleanup(){disposed=true;clearInterval(poll);observer.disconnect();closeSocket();if(dialog.open)dialog.close();}};
+ return{begin,async resume(){const running=await loginState();if(running){clearInterval(poll);poll=setInterval(loginState,1500);}},cleanup(){disposed=true;clearInterval(poll);clearTimeout(viewportTimer);observer.disconnect();window.visualViewport?.removeEventListener("resize",syncViewport);closeSocket();if(dialog.open)dialog.close();}};
 }

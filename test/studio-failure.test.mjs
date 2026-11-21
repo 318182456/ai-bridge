@@ -15,3 +15,16 @@ test('oversized and broken upstream errors remain bounded and generic',async()=>
 });
 
 test('Playwright responses retain real status and Google reason without reflecting private data',async()=>{const response={status:()=>403,headerValue:async()=>null,body:async()=>Buffer.from(JSON.stringify({error:{status:'PERMISSION_DENIED',message:'User location is not supported for the API use.'}}))};const e=await studioFailure(response);assert.equal(e.status,403);assert.match(e.message,/PERMISSION_DENIED/);assert.match(e.message,/出口地区/);let read=false;const large={status:()=>400,headerValue:async()=>'65537',body:async()=>{read=true;}};await studioFailure(large);assert.equal(read,false);});
+
+test('JSON+protobuf RPC tuples, sparse stream errors and base64 wrappers keep safe Google causes',async()=>{
+ for(const [body,expected]of [
+ ['[7,"Region not supported."]',/出口地区/],
+ [")]}'\n[[7,\"Account not supported.\"]]",/不支持当前账号/],
+ ['[,[7,"Permission denied: synthetic-private-token"]]',/当前会话的生成请求/],
+ [Buffer.from('[7,"Region not supported."]').toString('base64'),/出口地区/],
+ ['[null,[9,"synthetic-private-token"]]',/前置条件/]]){
+  const e=await studioFailure(new Response(body,{status:403}));assert.match(e.message,expected);assert.ok(!e.message.includes('synthetic-private-token'));assert.match(e.message,/PERMISSION_DENIED|FAILED_PRECONDITION/);
+ }
+});
+
+test('observed 403 does not falsely classify an account as disabled',async()=>{const e=await studioFailure(new Response('[7,"The caller does not have permission"]',{status:403}));assert.match(e.message,/PERMISSION_DENIED/);assert.match(e.message,/The caller does not have permission/);assert.ok(!/禁用|封禁|已限制该账号/.test(e.message));});

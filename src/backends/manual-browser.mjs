@@ -25,7 +25,7 @@ export class ManualBrowser{
   // Private Xauthority, local Unix display only; no X11 TCP listener (ASVS V12/V14).
   for(let n=90;n<150;n++){try{await access("/tmp/.X11-unix/X"+n);continue;}catch(e){if(e.code!=="ENOENT")throw e;}try{const path=join(tmpdir(),"ai-bridge-display-"+n+".lock");this.lock=await open(path,"wx",0o600);this.lockPath=path;this.display=":"+n;break;}catch(e){if(e.code!=="EEXIST")throw e;}}
   if(!this.display)throw failure();await this.command("xauth",["-f",this.authority,"source","-"],{input:"add "+this.display+" . "+randomBytes(16).toString("hex")+"\n"});
-  this.xvfb=this.child("Xvfb",[this.display,"-screen","0","1600x1000x24","-nolisten","tcp","-auth",this.authority,"-noreset"]);
+  this.xvfb=this.child("Xvfb",[this.display,"-screen","0","1600x1200x24","-nolisten","tcp","-auth",this.authority,"-noreset"]);
   let ready=false;for(let i=0;i<40;i++){this.assertActive();try{await this.command("xdotool",["getdisplaygeometry"],{max:1024,timeout:1000});ready=true;break;}catch{await sleep(100);}}if(!ready)throw failure();
   if(proxySetting())this.proxy=await manualProxy();
   // No automation, debugging or headless switches. Show the actual browser chrome/address bar.
@@ -35,7 +35,7 @@ export class ManualBrowser{
   if(!this.window)throw failure();await this.resize(this.size);await this.command("xdotool",["windowfocus",this.window]);return this;
  }
  assertActive(){if(this.cancelled||this.signal?.aborted)throw new AppError(499,"登录已取消","cancelled");if(this.closed||this.chrome?.stopped||this.chrome?.failed||this.xvfb?.stopped||this.xvfb?.failed)throw new AppError(503,"完整浏览器已关闭，请重新开始登录","manual_browser_closed");}
- async resize({width,height}){this.size={width:Math.max(640,Math.min(1600,Math.floor(width))),height:Math.max(480,Math.min(1000,Math.floor(height)))};if(this.window){await this.command("xdotool",["windowsize",this.window,String(this.size.width),String(this.size.height)]);await this.command("xdotool",["windowmove",this.window,"0","0"]);}}
+ async resize({width,height}){this.size={width:Math.max(640,Math.min(1600,Math.floor(width))),height:Math.max(480,Math.min(1200,Math.floor(height)))};if(this.window){await this.command("xdotool",["windowsize",this.window,String(this.size.width),String(this.size.height)]);await this.command("xdotool",["windowmove",this.window,"0","0"]);}}
  async capture(){this.assertActive();const dump=await this.command("xwd",["-root","-silent","-display",this.display],{max:16*1024*1024,timeout:5000});const hash=createHash("sha256").update(dump).update(JSON.stringify(this.size)).digest("hex");if(hash===this.frameHash&&this.frame)return this.frame;this.frameHash=hash;return this.frame=xwdPng(dump,this.size);}
  async paste(text){
   // ASVS V1.2.5: printable ASCII goes through stdin, never command arguments or a shell.
