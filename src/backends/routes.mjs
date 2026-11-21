@@ -28,7 +28,10 @@ export function registerAIStudio({register,body,send,backends,queue,store,logger
     if(input.stream!=null&&typeof input.stream!=="boolean")throw new AppError(400,"stream 必须为布尔值");
     const {backend:selector,...payload}=input;
     const account=await backend.selectAccount?.(payload);if(account)payload.account_id=account;
-    context.account_id=account||null;context.stage="queue";
+    context.account_id=account||null;
+    // ASVS 8.3.1: attribution comes from the selected server-side account, never from client-supplied labels.
+    const identity=account?await backend.accountIdentity?.(account):null;
+    context.account_name=identity?.name||null;context.stage="queue";
     let heartbeat;
     if(input.stream){
       res.writeHead(200,{"content-type":"text/event-stream; charset=utf-8","cache-control":"no-cache, no-transform","x-accel-buffering":"no","x-ai-bridge-backend":id,"x-stream-mode":"buffered"});
@@ -36,7 +39,7 @@ export function registerAIStudio({register,body,send,backends,queue,store,logger
       heartbeat=setInterval(()=>{if(!res.destroyed&&!res.writableEnded&&res.writableLength<65536)res.write(": waiting\n\n");},15000);heartbeat.unref?.();
     }
     try{return await queue.add(async jobSignal=>{
-      store.assertKeyActive(principal.key_id);context.stage="generation";
+      store.assertKeyActive(principal.key_id);context.stage="generation";logger.info("request.started",{request_id:requestId,account_id:account||null,account_name:context.account_name,stage:id,model:input.model});
       const {response,release}=await backend.open("/v1/chat/completions",{signal:jobSignal,method:"POST",json:payload});
       let completed=false;const usage=new UsageInspector(input.stream===true);
       try{
@@ -48,11 +51,13 @@ export function registerAIStudio({register,body,send,backends,queue,store,logger
       }finally{
         await response.body?.cancel().catch(()=>{});release();
         store.endKeyRequest(principal.key_id,completed,completed?usage.total:null);store.endBackendRequest(id,completed,completed?usage.total:null);context.outcome=true;
-        if(usage.accountId)await backend.recordUsage?.(usage.accountId,completed,completed?usage.total:null);
-        await store.event({id:requestId,api_key_id:principal.key_id,api_key_name:principal.key_name,account_id:usage.accountId||null,account_name:label+"（内置后端）",model:input.model,status:completed?response.status:response.ok?502:response.status,stage:completed?"completed":"generation",total_tokens:completed?usage.total:null,duration_ms:Date.now()-started});context.recorded=true;
-        logger[completed?"info":"warn"](completed?"request.completed":"request.failed",{request_id:requestId,stage:id,status:completed?200:response.ok?502:response.status,duration_ms:Date.now()-started});
+        const actualAccount=account||usage.accountId||null;
+        const actualIdentity=!identity&&actualAccount?await backend.accountIdentity?.(actualAccount):identity;
+        context.account_usage_recorded=true;if(actualAccount)await backend.recordUsage?.(actualAccount,completed,completed?usage.total:null);
+        await store.event({id:requestId,api_key_id:principal.key_id,api_key_name:principal.key_name,account_id:actualAccount,account_name:actualIdentity?.name||label+"（内置后端）",backend:id,model:input.model,status:completed?response.status:response.ok?502:response.status,stage:completed?"completed":"generation",total_tokens:completed?usage.total:null,duration_ms:Date.now()-started});context.recorded=true;
+        logger[completed?"info":"warn"](completed?"request.completed":"request.failed",{request_id:requestId,account_id:actualAccount,account_name:actualIdentity?.name||null,stage:id,status:completed?200:response.ok?502:response.status,duration_ms:Date.now()-started});
       }
-    },signal,{id:requestId,sharedKey:account||null,resource:account?null:"backend:"+id,cancelable:true,metadata:{account_id:account||null,resource_name:id==="aist"?"AI Studio 浏览器":"Robin 当前请求",kind:"generation",source:"api",account_name:label,model:input.model,api_key_name:principal.key_name,summary:label+" 模型调用",content:JSON.stringify(payload.messages)}});}finally{clearInterval(heartbeat);}
+    },signal,{id:requestId,sharedKey:account||null,resource:account?null:"backend:"+id,cancelable:true,metadata:{account_id:account||null,resource_name:id==="aist"?"AI Studio 浏览器":"Robin 当前请求",kind:"generation",source:"api",account_name:context.account_name||label,model:input.model,api_key_name:principal.key_name,summary:label+" 模型调用",content:JSON.stringify(payload.messages)}});}catch(error){if(account&&!context.account_usage_recorded){context.account_usage_recorded=true;await backend.recordUsage?.(account,false);}throw error;}finally{clearInterval(heartbeat);}
   }
   register("POST","/"+id+"/v1/chat/completions","api",async ctx=>chat(ctx,await body(ctx.req)));
   return chat;

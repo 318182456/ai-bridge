@@ -18,7 +18,7 @@ function setup(){
 }
 async function load(){
  const size=Number($("recordSize").value);
- const data=await ctx.api("/api/records?"+params({...applied,page,size}));last=data;
+ const data=await ctx.api("/api/records?"+params({...applied,page,size}));last=data;if(data.accounts){const selected=$("recordAccount").value,options=[...data.accounts];if(selected&&!options.some(a=>a.id===selected))options.push({id:selected,name:"历史记录："+selected});fillOptions($("recordAccount"),options,"全部账号");}
  if(page>1&&!data.items.length){page=Math.max(1,Math.ceil(data.total/size));return load();}
  $("exportRecords").href="/api/records/export?"+params(applied);
  const stats=data.stats;$("recordSummary").replaceChildren(
@@ -29,7 +29,7 @@ async function load(){
  );
  const target=$("recordRows");target.replaceChildren();
  for(const record of data.items){
-  const row=el("tr"),who=el("td",record.account_name||"尚未进入账号调度");who.append(el("small",record.model||"未提供模型"));
+  const row=el("tr"),who=el("td",record.account_name||"尚未进入账号调度");who.append(el("small",(record.backend?record.backend+" · ":"")+(record.model||"未提供模型")));
   const status=el("td",record.status===200?"成功":record.code==="cancelled"?"已取消":String(record.status),"");
   status.append(el("small",record.stage||record.kind||"历史记录"));status.className=record.status===200?"status-ready":"status-error";
   const usage=el("td",(record.duration_ms/1000).toFixed(1)+" 秒");usage.append(el("small",Number.isFinite(record.total_tokens)?number(record.total_tokens)+" Token":"未报告 Token"));

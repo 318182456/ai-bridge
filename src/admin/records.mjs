@@ -28,18 +28,25 @@ export function recordStats(records) {
     reported:records.filter(x=>Number.isFinite(x.total_tokens)).length,
     average_ms:total?Math.round(records.reduce((n,x)=>n+(x.duration_ms||0),0)/total):0};
 }
-export function registerRecords({register,send,store,body,logger}){
+export function registerRecords({register,send,store,body,logger,googleAccounts}){
+  async function accountView(){
+    const accounts=[...store.list().map(a=>({id:a.id,name:a.name})),...(await googleAccounts?.list()||[]).map(a=>({id:a.id,name:a.email}))];
+    const names=new Map(accounts.map(a=>[a.id,a.name]));
+    const view=record=>{const legacy=/^(Robin|AI Studio)（内置后端）$/.exec(record.account_name||'');return{...record,...(names.has(record.account_id)&&(!record.account_name||legacy)?{account_name:names.get(record.account_id)}:{}),...(legacy&&!record.backend?{backend:legacy[1]==='Robin'?'robin':'aist'}:{})};};
+    return{accounts,view};
+  }
   register("GET","/api/records","read",async({req,res})=>{
     store.prune();const query=Object.fromEntries(new URL(req.url,"http://internal").searchParams);
     const filters=recordFilters(query),items=selectRecords(store.state.events,filters);
     const page=Number(query.page||1),size=Number(query.size||store.state.settings.page_size);
     if(!Number.isInteger(page)||page<1||page>100000||![10,20,50,100].includes(size))throw new AppError(400,"分页参数无效");
-    send(res,{items:items.slice((page-1)*size,page*size),total:items.length,page,size,stats:recordStats(items)});
+    const accountInfo=await accountView();send(res,{accounts:accountInfo.accounts,items:items.slice((page-1)*size,page*size).map(accountInfo.view),total:items.length,page,size,stats:recordStats(items)});
   });
   register("GET","/api/records/export","read",async({req,res})=>{
     const filters=recordFilters(Object.fromEntries(new URL(req.url,"http://internal").searchParams));
+    const accountInfo=await accountView();
     res.writeHead(200,{"content-type":"application/json; charset=utf-8","content-disposition":'attachment; filename="agy-requests.json"'});
-    res.end(JSON.stringify({exported_at:new Date().toISOString(),filters,items:selectRecords(store.state.events,filters)},null,2));
+    res.end(JSON.stringify({exported_at:new Date().toISOString(),filters,items:selectRecords(store.state.events,filters).map(accountInfo.view)},null,2));
   });
   register("POST","/api/records/clear","mutation",async({req,res})=>{
     const input=await body(req);if(input.confirm!==true)throw new AppError(400,"请先确认清理范围");

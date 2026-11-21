@@ -575,10 +575,10 @@ export async function createApplication(options = {}) {
       if(req.trace&&!req.trace.recorded){
         const t=req.trace;
         if(!t.outcome){store.endKeyRequest(t.key_id,false);if(t.backend)store.endBackendRequest(t.backend,false);}
-        await store.event({id:requestId,api_key_id:t.key_id,api_key_name:t.key_name,account_id:t.account_id||null,account_name:t.account_name||null,
+        await store.event({id:requestId,api_key_id:t.key_id,api_key_name:t.key_name,account_id:t.account_id||null,account_name:t.account_name||null,backend:t.backend||"agy",
           model:t.model||"未提供模型",status,code:e.code||"internal_error",message:e instanceof AppError?e.message:"内部错误",stage:t.stage,duration_ms:Date.now()-t.started}).catch(()=>{});
       }
-      logger.warn("http.failed",{request_id:requestId,path:req.safePath||"/",method:req.method,status,code:e.code||"internal_error",stage:req.trace?.stage||"request",message:e instanceof AppError?e.message:"内部错误"});
+      logger.warn("http.failed",{request_id:requestId,path:req.safePath||"/",method:req.method,status,code:e.code||"internal_error",stage:req.trace?.stage||"request",account_id:req.trace?.account_id||null,account_name:req.trace?.account_name||null,message:e instanceof AppError?e.message:"内部错误"});
       if (res.destroyed) return;
       const value = {
         error: {

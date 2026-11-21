@@ -11,6 +11,7 @@ export class Robin {
  constructor({dataDir,logger,rpc=new RobinRPC(),tokenProvider,accounts=new GoogleAccounts(dataDir)}={}){Object.assign(this,{dir:join(dataDir,"backends","robin"),logger,rpc,tokenProvider,registry:accounts});this.cursor=0;this.active=0;this.conversations=new Map();this.cache=new Map();}
  status(){return{id:"robin",state:this.active?"ready":"managed",active_requests:this.active,resident_processes:0};}
  async catalogEntries(){return(await this.registry.list()).flatMap(a=>(a.robin_models||[]).map(model=>({model,account:{id:a.id,name:a.email},available:backendEnabled(a,"robin")&&["verified","authenticated"].includes(a.grants?.robin),checked_at:a.checked_at})));}
+ async accountIdentity(id){const a=await this.registry.get(id);return{id:a.id,name:a.email};}
  async recordUsage(id,success,tokens){await this.registry.recordUsage(id,"robin",success,tokens);}
  async accounts(){return(await this.registry.list()).map(a=>({...a,state:a.grants?.robin==="verified"?"ready":a.grants?.robin||"not_authorized"}));}
  async save(accounts){for(const account of accounts){const current=await this.registry.get(account.id);current.enabled=account.enabled;if(account.state==="needs_conversation_cleanup")current.grants.robin="needs_conversation_cleanup";await this.registry.put(current);}}
