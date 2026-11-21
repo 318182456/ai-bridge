@@ -142,6 +142,10 @@ Node.js22，依赖由npm锁文件固定。`npm test` 使用临时目录、真实
 
 NAS Compose 参考现有默认模板：继承 `/volume1/docker/all/compose-presets.yml` 的 `web-sso-bridge-model-api` 共享入口，加入外部 `postgres-network`，继承全局代理变量。应用名称、端口和数据卷保持本项目配置；不复制模板中的 Hindsight 端口或数据库。内网 `http://sa6400:18861`，外网 `https://agy-docker.wangxy.host:8443`。CLI 命令行部署时用 `docker compose --env-file ../all/global.env --env-file .env -f compose.nas.yaml up -d`；Dockhand 使用页面全局变量。
 
+NAS 模板为本项目单独补充 AIST / Robin 的模型 API 路由：仅 `/aist/v1/models`、`/aist/v1/chat/completions`、`/robin/v1/models`、`/robin/v1/chat/completions` 不经过网页 SSO，仍必须携带本项目 Bearer API 密钥；管理页与管理 API 保持原保护。修改标签后需重新创建应用容器，单纯重启不会更新 Docker 路由标签。
+
+Robin 专用模型列表是 `GET /robin/v1/models`；`GET /v1/models` 是全部后端的统一目录，两者数量可以不同。OpenAI SDK 的 Base URL 使用 `/robin/v1`；若客户端自行拼接 `/v1/models`（如 New API 的 OpenAI 渠道），API 地址应填到 `/robin`，避免丢失前缀或重复 `/v1`。Robin 模型名来自账号当前实际返回的模式展示名，不能用其他后端的模型清单替代。
+
 ## 镜像发布与开发
 
 GitHub Actions先运行测试，再构建linux/amd64和linux/arm64并发布到GHCR。版本标签 `v0.3.0` 对应镜像 `0.3.0`；main分支构建 `edge`，避免普通提交覆盖稳定版本。开发时使用 `docker compose -f compose.yaml -f compose.dev.yaml up --build`。

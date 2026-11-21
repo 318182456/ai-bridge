@@ -6,6 +6,9 @@ services:
     extends:
       file: ../all/compose-presets.yml
       service: web-sso-bridge-model-api
+    # ASVS 8.3.1: model endpoints still require the application API key; admin pages retain SSO.
+    labels:
+      - "traefik.http.routers.${TRAEFIK_SUBDOMAIN}-model-api.rule=HostRegexp(`^${TRAEFIK_SUBDOMAIN}[.](${TRAEFIK_DOMAIN_REGEX})$$`) && (Path(`/v1`) || PathPrefix(`/v1/`) || Path(`/v1beta`) || PathPrefix(`/v1beta/`) || Path(`/aist/v1/models`) || Path(`/aist/v1/chat/completions`) || Path(`/robin/v1/models`) || Path(`/robin/v1/chat/completions`))"
     networks: [postgres-network]
     init: true
     restart: unless-stopped
