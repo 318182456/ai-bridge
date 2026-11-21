@@ -9,7 +9,9 @@ CREATE TABLE IF NOT EXISTS ai_bridge.api_keys(id text PRIMARY KEY,value jsonb NO
 CREATE TABLE IF NOT EXISTS ai_bridge.request_events(id text PRIMARY KEY,occurred_at timestamptz NOT NULL,sequence bigserial,value jsonb NOT NULL);
 CREATE INDEX IF NOT EXISTS request_events_time ON ai_bridge.request_events(occurred_at DESC,sequence DESC);
 CREATE TABLE IF NOT EXISTS ai_bridge.auth_profiles(kind text NOT NULL,id text NOT NULL,checksum text NOT NULL,archive bytea NOT NULL,metadata jsonb NOT NULL,revision bigint NOT NULL DEFAULT 1,updated_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(kind,id));`;
-const hash=value=>createHash("sha256").update(Buffer.isBuffer(value)||typeof value==="string"?value:JSON.stringify(value)).digest("hex");
+// JSONB can reorder object keys; fingerprints must survive a database round trip.
+const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==="object"?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
+const hash=value=>createHash("sha256").update(Buffer.isBuffer(value)||typeof value==="string"?value:JSON.stringify(canonical(value))).digest("hex");
 export class Postgres {
  constructor(url,{pool}={}){this.pool=pool||new pg.Pool({connectionString:url,max:4,connectionTimeoutMillis:5000,idleTimeoutMillis:30000,statement_timeout:15000});this.pool.on?.("error",()=>{});this.pending=Promise.resolve();this.saved=null;this.closed=false;}
  async open({writer=true}={}){try{this.lease=await this.pool.connect();this.lease.on("error",()=>{this.failed=true;});if(writer){const r=await this.lease.query("SELECT pg_try_advisory_lock(193382,1) AS locked");if(!r.rows[0].locked)throw new AppError(409,"该数据库已有运行中的 AI Bridge，请先停止旧实例","storage_already_open");}await this.lease.query(ddl);return this;}catch(e){await this.close();if(e instanceof AppError)throw e;throw unavailable();}}
