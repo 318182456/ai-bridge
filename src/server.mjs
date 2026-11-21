@@ -122,7 +122,7 @@ export async function createApplication(options = {}) {
   const backends=new Backends();
   const googleAccounts=new GoogleAccounts(dataDir,storage),googleGrants=new GoogleGrants(dataDir,{storage});
   if(options.aistudio)backends.register("aist",options.aistudio);
-  else backends.register("aist",new AIStudio({dataDir,logger,engine:new BrowserEngine({root:dataDir,logger,accounts:googleAccounts,vault:authVault})}));
+  else backends.register("aist",new AIStudio({dataDir,logger,engine:new BrowserEngine({root:dataDir,logger,accounts:googleAccounts,vault:authVault,bindRobin:async(account,token,signal)=>{await googleGrants.bindRobin(account,token,signal);await backends.get("robin").verify(account,signal);}})}));
   backends.register("robin",options.robin||new Robin({dataDir,logger,accounts:googleAccounts,tokenProvider:id=>googleGrants.robinToken(id)}));
   const googleAuthorization=new GoogleAuthorization({accounts:googleAccounts,grants:googleGrants,store,loginManager,robin:backends.get("robin")});
   if(!options.aistudio)backends.get("aist").engine.authorize=googleAuthorization.authorize.bind(googleAuthorization);

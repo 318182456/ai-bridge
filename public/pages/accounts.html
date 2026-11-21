@@ -11,8 +11,8 @@
 </section>
 <dialog id="googleLoginDialog" class="detail-dialog google-login-dialog" aria-labelledby="googleLoginTitle" aria-describedby="aistLoginStatus">
 <header class="dialog-heading"><div><h2 id="googleLoginTitle">Google 官方登录</h2><p id="aistLoginStatus" class="muted" role="status">等待启动</p></div><button id="minimizeGoogleLogin" class="secondary small" type="button">收起窗口</button></header>
-<div class="google-login-toolbar"><div class="toolbar"><button id="googleZoomIn" class="secondary small" type="button">放大</button><button id="googleZoomFit" class="secondary small" type="button">适应窗口</button><span id="googleZoomLabel" class="muted">100%</span></div><button id="cancelGoogleLogin" class="secondary small danger" type="button" hidden>取消登录</button></div>
+<div class="google-login-toolbar"><div class="toolbar"><button id="googleZoomIn" class="secondary small" type="button">放大</button><button id="googleZoomFit" class="secondary small" type="button">适应窗口</button><span id="googleZoomLabel" class="muted">100%</span></div><button id="confirmGoogleLogin" class="small" type="button" hidden>已完成登录，继续验证</button><button id="skipGoogleGrant" class="secondary small" type="button" hidden>稍后授权 Robin</button><button id="cancelGoogleLogin" class="secondary small danger" type="button" hidden>取消登录</button></div>
 <div id="googleConnectPlaceholder" class="google-connect-placeholder" role="status">正在准备登录画面…</div>
 <div id="googleBrowser" class="remote-browser" hidden><canvas id="googleCanvas" tabindex="0" aria-label="Google 登录画面，可点击输入，滑动滚动"></canvas><textarea id="googleKeyboard" class="remote-keyboard" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="输入 Google 登录信息"></textarea></div>
-<p class="google-login-help muted">密码只在 Google 页面输入。点击输入，滑动滚动；放大后可拖动画面。收起不会取消授权。</p>
+<p class="google-login-help muted">在完整浏览器内核对地址并登录。进入 AI Studio 后点击“继续验证”，会实际调用一次模型。手机可放大后拖动查看；收起不取消。</p>
 </dialog>

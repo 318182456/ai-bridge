@@ -5,7 +5,7 @@ COPY scripts/install-cli.mjs /tmp/install-cli.mjs
 RUN CLI_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt node /tmp/install-cli.mjs && tar -xzf /tmp/agy.tar.gz -C /tmp antigravity && \
     install -m 0755 /tmp/antigravity /usr/local/bin/agy && \
     rm /tmp/agy.tar.gz /tmp/antigravity /tmp/install-cli.mjs && agy --version
-RUN apt-get update && apt-get install -y --no-install-recommends fontconfig fonts-noto-cjk fonts-noto-core fonts-liberation && fc-cache -f && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends xauth x11-apps x11-utils xdotool xclip fontconfig fonts-noto-cjk fonts-noto-core fonts-liberation && fc-cache -f && rm -rf /var/lib/apt/lists/*
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 LABEL org.opencontainers.image.title="AI Bridge" \
       org.opencontainers.image.source="https://github.com/318182456/ai-bridge" \

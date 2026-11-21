@@ -4,7 +4,7 @@ import {AppError} from "../common.mjs";
 export const proxySetting=()=>process.env.HTTPS_PROXY||process.env.HTTP_PROXY||process.env.ALL_PROXY||null;
 const failed=()=>new AppError(502,"上游代理或 TLS 连接失败","upstream_connection_failed");
 async function ready(socket,event,signal){return new Promise((resolve,reject)=>{let timer;const done=(error)=>{clearTimeout(timer);socket.off(event,success);socket.off("error",errorHandler);signal?.removeEventListener("abort",abort);if(error){socket.destroy();reject(error);}else resolve(socket);};const success=()=>done();const errorHandler=()=>done(failed());const abort=()=>done(new AppError(499,"请求已取消","cancelled"));socket.once(event,success);socket.once("error",errorHandler);signal?.addEventListener("abort",abort,{once:true});timer=setTimeout(()=>done(failed()),15000);if(signal?.aborted)abort();});}
-export async function connectTLS(host,port=443,{signal,alpn,proxy=proxySetting()}={}){
+export async function connectTunnel(host,port=443,{signal,proxy=proxySetting()}={}){
  if(!/^[a-zA-Z0-9.-]+$/.test(host)||!Number.isInteger(port)||port<1||port>65535)throw failed();
  let socket;
  if(proxy){let url;try{url=new URL(proxy);}catch{throw failed();}if(!["http:","https:"].includes(url.protocol))throw new AppError(503,"当前原生上游连接需要 HTTP/HTTPS CONNECT 代理","unsupported_proxy");
@@ -18,5 +18,8 @@ export async function connectTLS(host,port=443,{signal,alpn,proxy=proxySetting()
    socket.write("CONNECT "+host+":"+port+" HTTP/1.1\r\nHost: "+host+":"+port+"\r\n"+credentials+"\r\n");if(signal?.aborted)abort();
   });
  }
- const secure=tls.connect({...(socket?{socket}:{host,port}),servername:host,rejectUnauthorized:true,...(alpn?{ALPNProtocols:alpn}:{})});secure.on("error",()=>{});return ready(secure,"secureConnect",signal);
+ if(!socket){socket=net.connect({host,port});await ready(socket,"connect",signal);}socket.on("error",()=>{});return socket;
+}
+export async function connectTLS(host,port=443,{signal,alpn,proxy=proxySetting()}={}){
+ const socket=await connectTunnel(host,port,{signal,proxy});const secure=tls.connect({socket,servername:host,rejectUnauthorized:true,...(alpn?{ALPNProtocols:alpn}:{})});secure.on("error",()=>{});return ready(secure,"secureConnect",signal);
 }

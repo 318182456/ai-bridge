@@ -26,7 +26,7 @@ printf '%s' "$version" | LC_ALL=C grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.
 repository=${AI_BRIDGE_REPOSITORY:-318182456/ai-bridge}
 printf '%s' "$repository" | LC_ALL=C grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || exit 2
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl xz-utils openssl fontconfig fonts-noto-cjk fonts-noto-core fonts-liberation dbus gnome-keyring libsecret-tools libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libcups2 libdrm2 libx11-6 libxext6 libxcb1 libgtk-3-0 libnss3 libdbus-glib-1-2 libxtst6 libxrandr2 libgbm1 libxkbcommon0 libpango-1.0-0 libcairo2 libxcomposite1 libxdamage1 libxfixes3 libx11-xcb1 xvfb
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl xz-utils openssl xauth x11-apps x11-utils xdotool xclip fontconfig fonts-noto-cjk fonts-noto-core fonts-liberation dbus gnome-keyring libsecret-tools libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libcups2 libdrm2 libx11-6 libxext6 libxcb1 libgtk-3-0 libnss3 libdbus-glib-1-2 libxtst6 libxrandr2 libgbm1 libxkbcommon0 libpango-1.0-0 libcairo2 libxcomposite1 libxdamage1 libxfixes3 libx11-xcb1 xvfb
 # libasound package name changed with Ubuntu 24.04's t64 transition.
 if apt-cache show libasound2t64 >/dev/null 2>&1; then
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libasound2t64

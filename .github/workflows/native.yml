@@ -29,6 +29,10 @@ jobs:
         run: sh -n scripts/install.sh
       - name: Install browser runtime for smoke test
         run: npx --no-install playwright-core install --with-deps chromium --no-shell
+      - name: Install manual desktop dependencies
+        run: sudo apt-get update && sudo apt-get install -y xauth x11-apps x11-utils xdotool xclip
+      - name: Verify manual browser and profile persistence
+        run: node scripts/check-manual-browser.mjs
       - name: Verify sandboxed browser lifecycle
         run: node scripts/check-browser.mjs
       - name: Download and verify pinned official agy

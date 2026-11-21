@@ -4,9 +4,9 @@
 
 ## 当前开发状态
 
-本地版本 `0.4.0-alpha.2`：三后端代码、共享调度、统一 Google 登录编排和 Linux 安装器已实现。自动化测试和模拟浏览器操作已通过；**真实 Google 的三后端授权与生成、Linux 安装和 NAS 新镜像尚未完成验证**，不能据此认定全部可用。发布文件尚未上传时，一键安装命令无法使用。
+当前发布版 `0.4.0-alpha.7` 已提供 Docker 镜像与 amd64/arm64 原生 Linux 安装包。新的完整浏览器登录正在验证：登录期间由独立 Chromium 显示真实地址栏，用户手动操作；不使用 Playwright、CDP 或自动填写 Google 登录表单。完成 AI Studio 登录后点击“已完成登录，继续验证”，程序关闭完整浏览器，再读取模型并实际生成验证。Robin 仍需单独确认产品授权，也可稍后处理；agy 沿用已有官方 CLI 登录入口。
 
-一次 Google 网页登录复用同一受限浏览器资料目录，依次申请各产品授权。每个产品独立执行实际生成验证，未授权或验证失败显示单独状态；不将 agy 凭据提取后冒充其他产品认证。Google 仍可能要求分别确认授权，或拒绝账号、地区、产品权限。
+同一 Google 身份可以复用浏览器登录资料，但各产品权限并不等价。Google 仍可能拒绝账号、地区或浏览器；只有实际验证成功才显示对应后端已就绪，界面与模拟测试通过不代表 Google 接受真实登录。
 
 ## 运行与接口
 
@@ -19,7 +19,7 @@
 
 ## 资源与部署
 
-三个后端共享全局并发预算，默认 1；登录排他。浏览器按需下载、启动，同一时刻只有一个账号资料目录，空闲约两分钟回收。模型目录读取使用缓存，不启动浏览器。实际进程树消耗尚未测量，不提供未经测量的 VPS 内存承诺。
+三个后端共享模型并发预算，默认 1；登录使用独立位置，仅锁定目标账号。浏览器按需下载、启动，模型浏览器池最多两个账号资料目录，空闲约两分钟回收。完整浏览器和私有 Xvfb 仅在手动登录期间运行，关闭后释放；截图只在当前受保护会话中传输。模型目录读取使用缓存，不启动浏览器。实际进程树消耗尚未测量，不提供未经测量的 VPS 内存承诺。
 
 Docker 使用版本化 GHCR 镜像；原生 Linux 发行包包含 Node.js 与经 SHA-256 校验的官方 CLI，不在 VPS 编译源码。`scripts/install.sh --version VERSION` 面向 Debian/Ubuntu + systemd、amd64/arm64；发布后从同一 GitHub Release 获取对应架构包及校验文件。配置 `/etc/ai-bridge/ai-bridge.env`，数据 `/var/lib/ai-bridge`，程序 `/opt/ai-bridge`，更新保留配置和数据。
 
@@ -38,7 +38,7 @@ Chromium 默认启用沙盒；部署主机需支持其系统运行依赖与用�
 
 ## 群晖安装
 
-项目路径建议 `/volume1/docker/agy-docker`。需要 Container Manager 与 Docker Compose v2；支持 amd64/arm64。镜像固定官方 CLI 1.5.3，并核对官方发布产物 SHA-256。不是完整桌面或浏览器容器。
+项目路径建议 `/volume1/docker/agy-docker`。需要 Container Manager 与 Docker Compose v2；支持 amd64/arm64。镜像固定官方 CLI 1.5.3，并核对官方发布产物 SHA-256。镜像包含按需运行的 Chromium 与私有 Xvfb，不提供公开桌面端口。
 
 生产环境直接拉取版本镜像，不需要 Node、Git 或本地编译。将 `compose.yaml` 和 `.env.example` 放入项目目录，复制 `.env.example` 为 `.env`，填写两个不同的长随机密码：`ADMIN_PASSWORD` 和 `API_KEY`。
 
