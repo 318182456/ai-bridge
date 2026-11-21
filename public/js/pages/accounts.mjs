@@ -10,7 +10,7 @@ export function mount(ctx){
   function visibleAccounts(){
     const query=$("accountSearch").value.trim().toLowerCase(),status=$("accountStatus").value;
     return directory().filter(a=>(!query||[a.identity,a.name,a.id,a.google?.id].join(" ").toLowerCase().includes(query))&&
-      (!status||(status==="enabled"?a.any_enabled:status==="disabled"?!a.any_enabled:!a.checked_at||["login_required","account_suspended"].includes(a.status))));
+      (!status||(status==="enabled"?a.any_enabled:status==="disabled"?!a.any_enabled:!a.checked_at||["login_required","account_suspended"].includes(a.status)||Object.values(a.google?.verification||{}).some(v=>v.state==="failed")||Object.values(a.google?.grants||{}).includes("needs_attention"))));
   }
   function selectionInfo(){$("selectionCount").textContent=selected.size?"已选 "+selected.size+" 个账号":"未选择账号";$("bulkEnable").disabled=$("bulkDisable").disabled=!selected.size;}
   function feedbackRow(id,title){
@@ -102,6 +102,28 @@ function renderAccounts() {
       (primary?bar:more).append(b);
       if(["starting","running","submitted","checking"].includes(loginStates.get(a.id))&&label!=="登录 agy")b.disabled=true;return b;
     };
+    button("改名", async () => {
+      const cell = feedbackRow(a.id, "修改账号名称");
+      const input = document.createElement("input");
+      input.value = a.name;
+      input.maxLength = 100;
+      input.setAttribute("aria-label", "新账号名称");
+      const save = text("button", "保存");
+      save.onclick = async () => {
+        try {
+          await api(a.native?"/api/accounts/"+a.id:"/api/backends/aist/accounts/"+a.google.id+"/name", {
+            method: "PATCH",
+            data: { name: input.value },
+          });
+          expanded.delete(a.id);
+          await refresh();
+        } catch (e) {
+          cell.append(text("p", e.message, "status-error"));
+        }
+      };
+      cell.append(input, save);
+      input.focus();
+    });
     if(a.google){
       button("本机登录 AIST",()=>localLogin.begin(a.google.id,"aist"));
       button("本机登录 Robin",()=>localLogin.begin(a.google.id,"robin"));
@@ -141,28 +163,6 @@ function renderAccounts() {
       const cell=feedbackRow(a.id,"删除 agy 授权");cell.append(text("p","删除此账号的 agy 登录目录、数据库授权快照、模型和额度缓存；AIST / Robin 授权、账号记录与历史用量保留。再次使用需重新登录。","muted"));
       const confirm=text("button","确认删除 agy 授权","secondary danger");confirm.onclick=async()=>{confirm.disabled=true;try{await api("/api/accounts/"+a.id+"/authorization",{method:"DELETE"});expanded.delete(a.id);panels.delete(a.id);await refresh();feedbackRow(a.id,"agy 授权已删除");}catch(e){cell.append(text("p",e.message,"status-error"));confirm.disabled=false;}};cell.append(confirm);
     },true);
-    button("改名", async () => {
-      const cell = feedbackRow(a.id, "修改账号名称");
-      const input = document.createElement("input");
-      input.value = a.name;
-      input.maxLength = 100;
-      input.setAttribute("aria-label", "新账号名称");
-      const save = text("button", "保存");
-      save.onclick = async () => {
-        try {
-          await api("/api/accounts/" + a.id, {
-            method: "PATCH",
-            data: { name: input.value },
-          });
-          expanded.delete(a.id);
-          await refresh();
-        } catch (e) {
-          cell.append(text("p", e.message, "status-error"));
-        }
-      };
-      cell.append(input, save);
-      input.focus();
-    });
     button(
       "移除",
       async () => {

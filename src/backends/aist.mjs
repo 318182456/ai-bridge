@@ -5,8 +5,8 @@ import {toStudioRequest,StudioChat} from "./aist-protocol.mjs";
 export class AIStudio {
  constructor({dataDir,logger,engine}={}){this.engine=engine||new BrowserEngine({root:dataDir,logger});this.logger=logger;this.active=0;}
  status(){return{id:"aist",state:this.active?"ready":"managed",active_requests:this.active,resident_processes:0};}
- async catalogEntries(){return(await this.engine.accounts?.list()||[]).flatMap(a=>(a.models||[]).map(model=>({model,account:{id:a.id,name:a.email},available:backendEnabled(a,"aist")&&["verified","authenticated","synced"].includes(a.grants?.aist),checked_at:a.checked_at})));}
- async accountIdentity(id){const a=await this.engine.accounts.get(id);return{id:a.id,name:a.email};}
+ async catalogEntries(){return(await this.engine.accounts?.list()||[]).flatMap(a=>(a.models||[]).map(model=>({model,account:{id:a.id,name:a.name||a.email},available:backendEnabled(a,"aist")&&["verified","authenticated","synced"].includes(a.grants?.aist),checked_at:a.checked_at})));}
+ async accountIdentity(id){const a=await this.engine.accounts.get(id);return{id:a.id,name:a.name||a.email};}
  async recordUsage(id,success,tokens){await this.engine.accounts?.recordUsage(id,"aist",success,tokens);}
  async result(op,input,signal){let result={};for await(const event of this.engine.run(op,input,signal))if(event.result)result=event.result;return result;}
  async selectAccount(input){return this.engine.selectAccount?this.engine.selectAccount(input):input.account_id||null;}

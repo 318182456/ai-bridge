@@ -28,6 +28,7 @@ export function registerBackendAuthorization({register,send,accounts,grants,back
   const id=match[1];store.get(id);
   if(loginManager.current?.id===id&&['starting','running','submitted','checking'].includes(loginManager.current.state))throw new AppError(409,'请先结束该账号的登录，再删除授权');
   await queue.add(async()=>{
+   if(loginManager.current?.id===id&&["starting","running","submitted","checking"].includes(loginManager.current.state))throw new AppError(409,"请先结束该账号的登录，再删除授权");
    const a=store.get(id);a.enabled=false;await store.save();await sessions.closeWhere(s=>s.account===id);
    const ring=runner.keyrings?.entries.get(id);if(ring?.refs)throw new AppError(409,'账号密钥环仍在使用，请稍后重试');await ring?.closing;
    await forgetProfile(authVault,dataDir,'agy',id);

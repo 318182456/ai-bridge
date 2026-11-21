@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends fontconfig font
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 LABEL org.opencontainers.image.title="AI Bridge" \
       org.opencontainers.image.source="https://github.com/318182456/ai-bridge" \
-      org.opencontainers.image.version="0.4.0-alpha.19"
+      org.opencontainers.image.version="0.4.0-alpha.20"
 WORKDIR /app
 COPY --chown=node:node package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts

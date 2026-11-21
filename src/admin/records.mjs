@@ -30,7 +30,7 @@ export function recordStats(records) {
 }
 export function registerRecords({register,send,store,body,logger,googleAccounts}){
   async function accountView(){
-    const accounts=[...store.list().map(a=>({id:a.id,name:a.name})),...(await googleAccounts?.list()||[]).map(a=>({id:a.id,name:a.email}))];
+    const accounts=[...store.list().map(a=>({id:a.id,name:a.name})),...(await googleAccounts?.list()||[]).map(a=>({id:a.id,name:a.name||a.email}))];
     const names=new Map(accounts.map(a=>[a.id,a.name]));
     const view=record=>{const legacy=/^(Robin|AI Studio)（内置后端）$/.exec(record.account_name||'');return{...record,...(names.has(record.account_id)&&(!record.account_name||legacy)?{account_name:names.get(record.account_id)}:{}),...(legacy&&!record.backend?{backend:legacy[1]==='Robin'?'robin':'aist'}:{})};};
     return{accounts,view};

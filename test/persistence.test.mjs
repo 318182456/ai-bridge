@@ -20,8 +20,8 @@ test('credential snapshots restore a missing keyring and retain last valid backu
 });
 test('account directory merges explicit links once but never merges matching display names',()=>{
  const native=[{id:'a_1',name:'same',enabled:true,models:[],requests:2,successes:2,failures:0,total_tokens:8,token_reports:2},{id:'a_2',name:'same',enabled:true,models:[]}];
- const google=[{id:'g_1',label:'same',agy_account_id:'a_1',enabled:true,models:[],usage:{aist:{requests:3,successes:2,failures:1,total_tokens:10,reports:2}}},{id:'g_2',label:'same',enabled:false,models:[]}];
- const rows=accountDirectory(native,google);assert.equal(rows.length,3);assert.equal(rows.filter(a=>a.native?.id==='a_1').length,1);assert.equal(rows[0].requests,5);assert.equal(rows[0].total_tokens,18);assert.equal(rows.at(-1).id,'a_2');
+ const google=[{id:'g_1',label:'same',agy_account_id:'a_1',enabled:true,models:[],usage:{aist:{requests:3,successes:2,failures:1,total_tokens:10,reports:2}}},{id:'g_2',label:'same',enabled:false,name:'Robin display',models:[],robin_models:[{id:'robin-only'}]}];
+ const rows=accountDirectory(native,google);assert.equal(rows.length,3);assert.equal(rows.filter(a=>a.native?.id==='a_1').length,1);assert.equal(rows[0].requests,5);assert.equal(rows[0].total_tokens,18);assert.equal(rows.at(-1).id,'a_2');assert.equal(rows[1].model_count,1);assert.equal(rows[1].name,'Robin display');
 });
 
 test('PostgreSQL persists normalized state and snapshots across restart, guards singleton ownership and rollback',{skip:!process.env.PG_TEST_URL},async()=>{

@@ -25,7 +25,7 @@ export function registerAdmin(ctx){
   register("GET","/api/overview","read",async({res})=>{
     store.prune();const accounts=store.list(),records=store.state.events;
     const google=await googleAccounts?.list()||[];const linked=new Set(google.map(g=>g.agy_account_id).filter(Boolean));const ranking=accounts.filter(a=>!linked.has(a.id));
-    for(const g of google){const cli=accounts.find(a=>a.id===g.agy_account_id);const rows=Object.values(g.usage||{});ranking.push({id:g.id,name:g.email,total_tokens:(cli?.total_tokens||0)+rows.reduce((n,u)=>n+u.total_tokens,0),requests:(cli?.requests||0)+rows.reduce((n,u)=>n+u.requests,0)});}
+    for(const g of google){const cli=accounts.find(a=>a.id===g.agy_account_id);const rows=Object.values(g.usage||{});ranking.push({id:g.id,name:cli?.name||g.name||g.email,total_tokens:(cli?.total_tokens||0)+rows.reduce((n,u)=>n+u.total_tokens,0),requests:(cli?.requests||0)+rows.reduce((n,u)=>n+u.requests,0)});}
     const days=new Map(),models=new Map();
     const since=Date.now()-7*86400000;
     for(const e of records){

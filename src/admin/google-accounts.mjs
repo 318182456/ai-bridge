@@ -1,6 +1,10 @@
 import {AppError,object} from '../common.mjs';
 export function registerGoogleAccounts({register,send,body,accounts,store,queue,sync,browser}){
  // ASVS 2.2.2: session/Origin/CSRF policy comes from the mutation registrar; all associations are explicit administrator choices.
+ register('PATCH',/^\/api\/backends\/aist\/accounts\/(g_[a-f0-9]{24})\/name$/,'mutation',async({req,res,match,signal})=>{
+  const input=object(await body(req));if(Object.keys(input).some(k=>k!=='name')||typeof input.name!=='string'||!input.name.trim()||input.name.trim().length>100)throw new AppError(400,'请输入不超过 100 字符的账号名称');
+  await queue.add(async()=>{const a=await accounts.get(match[1]);a.name=input.name.trim();await accounts.save();},signal,{key:match[1],lane:'login',metadata:{kind:'account',summary:'修改 Google 账号显示名称'}});send(res,{updated:true});
+ });
  register('POST',/^\/api\/backends\/aist\/accounts\/(g_[a-f0-9]{24})\/agy$/,'mutation',async({req,res,match,signal})=>{
   const input=object(await body(req));if(Object.keys(input).some(k=>!['create','native_account_id'].includes(k))||!!input.create===!!input.native_account_id||input.create!=null&&input.create!==true||input.native_account_id!=null&&!/^a_[a-f0-9]{16}$/.test(input.native_account_id))throw new AppError(400,'请选择现有 agy 账号或新建账号');
   const result=await queue.add(async()=>{const a=await accounts.get(match[1]);if(a.agy_account_id){try{return{account_id:store.get(a.agy_account_id).id};}catch(e){if(e.status!==404)throw e;}}
