@@ -27,7 +27,8 @@ export function registerAIStudio({register,body,send,backends,queue,store,logger
     if(input.session_id!=null)throw new AppError(400,"此后端暂不支持 CLI session_id","unsupported_parameter");
     if(input.stream!=null&&typeof input.stream!=="boolean")throw new AppError(400,"stream 必须为布尔值");
     const {backend:selector,...payload}=input;
-    context.stage="queue";
+    const account=await backend.selectAccount?.(payload);if(account)payload.account_id=account;
+    context.account_id=account||null;context.stage="queue";
     let heartbeat;
     if(input.stream){
       res.writeHead(200,{"content-type":"text/event-stream; charset=utf-8","cache-control":"no-cache, no-transform","x-accel-buffering":"no","x-ai-bridge-backend":id,"x-stream-mode":"buffered"});
@@ -51,7 +52,7 @@ export function registerAIStudio({register,body,send,backends,queue,store,logger
         await store.event({id:requestId,api_key_id:principal.key_id,api_key_name:principal.key_name,account_id:usage.accountId||null,account_name:label+"（内置后端）",model:input.model,status:completed?response.status:response.ok?502:response.status,stage:completed?"completed":"generation",total_tokens:completed?usage.total:null,duration_ms:Date.now()-started});context.recorded=true;
         logger[completed?"info":"warn"](completed?"request.completed":"request.failed",{request_id:requestId,stage:id,status:completed?200:response.ok?502:response.status,duration_ms:Date.now()-started});
       }
-    },signal,{id:requestId,resource:"backend:"+id,cancelable:true,metadata:{resource_name:id==="aist"?"AI Studio 浏览器":"Robin 当前请求",kind:"generation",source:"api",account_name:label,model:input.model,api_key_name:principal.key_name,summary:label+" 模型调用",content:JSON.stringify(payload.messages)}});}finally{clearInterval(heartbeat);}
+    },signal,{id:requestId,sharedKey:account||null,resource:account?null:"backend:"+id,cancelable:true,metadata:{account_id:account||null,resource_name:id==="aist"?"AI Studio 浏览器":"Robin 当前请求",kind:"generation",source:"api",account_name:label,model:input.model,api_key_name:principal.key_name,summary:label+" 模型调用",content:JSON.stringify(payload.messages)}});}finally{clearInterval(heartbeat);}
   }
   register("POST","/"+id+"/v1/chat/completions","api",async ctx=>chat(ctx,await body(ctx.req)));
   return chat;

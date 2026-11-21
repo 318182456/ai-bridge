@@ -125,3 +125,8 @@ html,body{height:100%;overflow:hidden}.app-layout{height:100dvh;min-height:0}.ma
 @media(max-width:780px){#main{padding:16px}.topbar{flex-shrink:0}.page-heading{margin-bottom:14px}.page-heading h1{font-size:21px}.queue-card{padding:13px}.queue-card .note{font-size:10px;max-height:48px;overflow:auto}.queue-card .filters{gap:10px}.page-footer{font-size:9px;padding:8px 12px}}
 
 .remote-browser{position:relative;max-height:58dvh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:7px;overscroll-behavior:contain}.remote-browser canvas{display:block;width:100%;height:auto;touch-action:none;outline-offset:-3px}.remote-keyboard{position:absolute!important;opacity:0;width:1px;height:1px;left:0;top:0;padding:0;border:0;resize:none;pointer-events:none}.remote-browser:focus-within{outline:2px solid var(--primary);outline-offset:2px}
+
+.section-tabs{position:sticky;top:-1px;z-index:3;display:flex;gap:4px;padding:8px 0;margin-bottom:14px;background:var(--canvas);border-bottom:1px solid var(--line)}
+.section-tabs [role=tab]{background:transparent;border-color:transparent;color:var(--muted);border-radius:5px}
+.section-tabs [aria-selected=true]{color:var(--primary);background:var(--primary-soft);border-color:var(--line)}
+#googleAddHost .inline-panel{margin-bottom:0}.accounts-table small{display:block}

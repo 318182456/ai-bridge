@@ -1,5 +1,5 @@
 import {el,number,fmtDate,action,emptyRows,note} from "../core.mjs";
-export function mount(ctx){
+export function mount(ctx,{isActive=()=>true}={}){
   const $=ctx.$;let data=null,disposed=false,timer=null,confirmId=null,loading=false;
   const types={generation:"模型请求",login:"Google 登录",verification:"实际调用校验",quota:"额度查询"};
   const names={waiting:"等待中",running:"执行中",cancelling:"取消中"};
@@ -14,7 +14,7 @@ export function mount(ctx){
   }
   function render(){
     if(!data)return;
-    $("queueSummary").replaceChildren(el("span","执行 "+data.running+" / "+data.concurrency),el("span","排队 "+data.waiting+" / "+data.limit),el("span",data.exclusive?"登录 / 校验独占中":"同账号串行 · 不同账号按并发设置执行"));
+    $("queueSummary").replaceChildren(el("span","模型 "+(data.model_running??data.running)+" / "+data.concurrency+" · 登录 "+(data.login_running||0)+" / "+(data.login_concurrency||1)),el("span","排队 "+data.waiting+" / "+data.limit),el("span",data.exclusive?"登录 / 校验独占中":"独立请求并发 · 连续对话逐轮执行"));
     const query=$("queueSearch").value.toLowerCase(),state=$("queueState").value;
     const list=data.items.filter(x=>(!state||x.state===state)&&(!query||[x.id,x.summary,x.account_name,x.model,x.api_key_name].join(" ").toLowerCase().includes(query)));
     const rows=$("queueRows");rows.replaceChildren();
@@ -34,7 +34,7 @@ export function mount(ctx){
   async function refresh(){if(loading)return;loading=true;try{const value=await ctx.api("/api/queue");if(!disposed){data=value;render();}}catch(error){if(!disposed)note("queueFeedback",error.message,true);}finally{loading=false;}}
   $("queueCloseDetail").onclick=()=>$("queueDetail").close();$("queueDetail").addEventListener("close",clearDetail);
   $("queueConfirmCancel").onclick=async()=>{const button=$("queueConfirmCancel");button.disabled=true;try{await ctx.api("/api/queue/"+confirmId,{method:"DELETE"});$("queueDetail").close();await refresh();note("queueFeedback","已请求取消，资源回收后任务会从队列移除。");}catch(error){note("queueFeedback",error.message,true);}finally{button.disabled=false;}};
-  $("queueSearch").oninput=render;$("queueState").onchange=render;$("queueRefresh").onclick=refresh;
-  timer=setInterval(()=>{if(!document.hidden)void refresh();},2000);
+  $("queueSearch").oninput=render;$("queueState").onchange=render;
+  timer=setInterval(()=>{if(!document.hidden&&isActive())void refresh();},2000);
   return {render:refresh,cleanup(){disposed=true;clearInterval(timer);if($("queueDetail").open)$("queueDetail").close();clearDetail();data=null;}};
 }

@@ -14,7 +14,7 @@
 <button id="navBackdrop" class="nav-backdrop" aria-label="关闭导航" hidden></button>
 <div class="main-column">
 <header class="topbar"><div class="topbar-left"><button class="icon-button mobile-only" id="menuToggle" aria-label="打开导航" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button><span class="breadcrumb">工作空间 <span>/</span> {{title}}</span></div>
-<div class="toolbar"><a id="runtimeBadge" class="status-pill" href="/panel/queue" hidden title="查看执行队列">连接中</a><button id="refresh" class="secondary small" hidden>刷新</button><button id="logout" class="quiet small" hidden>退出</button></div></header>
+<div class="toolbar"><a id="runtimeBadge" class="status-pill" href="/panel/tasks?view=queue" hidden title="查看执行队列">连接中</a><button id="refresh" class="secondary small" hidden>刷新</button><button id="logout" class="quiet small" hidden>退出</button></div></header>
 <main id="main"><div class="page-heading"><div><p class="eyebrow">AI BRIDGE</p><h1>{{title}}</h1><p class="muted">{{description}}</p></div><span id="versionBadge" class="badge">AI Bridge</span></div>
 <section class="card login-card" id="login"><img src="/icon.svg" alt="" width="44" height="44"/><h2>登录管理台</h2><p class="muted">使用部署配置中的管理密码，内外网均可访问。</p>
 <form id="loginForm"><label>管理密码<input id="password" type="password" autocomplete="current-password" required/></label><button>登录</button><p id="loginFeedback" class="feedback" role="status"></p></form></section>

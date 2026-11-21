@@ -34,8 +34,8 @@ export function loginDisplay(raw) {
   return { url, text: plain };
 }
 export class LoginManager {
-  constructor({ dataDir, queue, store, keyrings = null, launch = spawn, verify = null, logger = null, beforeLogin = null }) {
-    Object.assign(this, { dataDir, queue, store, keyrings, launch, verify, logger, beforeLogin });
+  constructor({ dataDir, queue, store, keyrings = null, launch = spawn, verify = null, logger = null, beforeLogin = null, profile = null }) {
+    Object.assign(this, { dataDir, queue, store, keyrings, launch, verify, logger, beforeLogin, profile });
     this.current = null;
   }
   view(owner, id) {
@@ -54,7 +54,8 @@ export class LoginManager {
     };
   }
   start(owner, id, options={}) {
-    if(options.withinExclusive&&(!this.queue.exclusive||this.queue.running!==1))throw new AppError(409,"共享授权必须持有排他队列");
+    if(options.withinLogin&&this.queue.loginRunning!==1)throw new AppError(409,"共享授权必须持有登录位置");
+    if(!options.withinLogin&&this.queue.loginRunning)throw new AppError(409,"已有另一项登录正在进行");
     accountId(id);
     this.store.get(id);
     if (
@@ -64,7 +65,6 @@ export class LoginManager {
     )
       return this.view(owner, id);
     if (
-      (!options.withinExclusive&&(this.queue.running||this.queue.waiting.length)) ||
       (this.current && activeStates.has(this.current.state))
     )
       throw new AppError(409, "请等待当前任务或登录完成");
@@ -77,9 +77,10 @@ export class LoginManager {
       submitted: false,
       bytes: 0,
       checkingPromise: null,
+      withinLogin: !!options.withinLogin,
     });
     this.logger?.info("login.started",{account_id:id});
-    const schedule=options.withinExclusive?(action)=>Promise.resolve().then(()=>action(options.signal)):this.queue.add.bind(this.queue);
+    const schedule=options.withinLogin?(action)=>Promise.resolve().then(()=>action(options.signal)):this.queue.add.bind(this.queue);
     s.work = schedule(
         async (signal) => {
           s.signal = signal;
@@ -88,8 +89,8 @@ export class LoginManager {
           signal?.addEventListener("abort",interrupted,{once:true});
           if(signal?.aborted)interrupted();
           try {
-            await this.beforeLogin?.();
-            const p = await profilePaths(this.dataDir, id);
+            await this.beforeLogin?.(id);
+            const p = await (this.profile?this.profile(id):profilePaths(this.dataDir,id));
             const workspace = resolve(join(this.dataDir, "accounts", id, "login-workspace"));
             await mkdir(workspace, {recursive: true, mode: 0o700});
             if (await realpath(workspace) !== workspace)
@@ -194,7 +195,7 @@ export class LoginManager {
           }
         },
         undefined,
-        {key:id,exclusive:true,cancelable:true,metadata:{kind:"login",account_name:this.store.get(id).name,summary:"Google 官方登录与首次设置"},
+        {key:id,lane:"login",cancelable:true,metadata:{kind:"login",account_name:this.store.get(id).name,summary:"Google 官方登录与首次设置"},
           checkCancelable:()=>{if(s.state==="checking")throw new AppError(409,"正在校验，请等待校验结束后再取消登录");},onCancel:()=>this.stop(owner,id)},
       )
       .catch(() => {
@@ -280,9 +281,9 @@ export class LoginManager {
       "\n[网页] 正在验证已保存的登录状态；不会提前终止官方登录进程。\n",
     );
     const run = (signal) => verify((part) => this.append(s, part),signal||s.signal);
-    const work = s.child
+    const work = s.child || s.withinLogin
       ? Promise.resolve().then(()=>run(s.signal))
-      : this.queue.add(run, undefined, {key:id,exclusive:true,cancelable:true,metadata:{kind:"verification",account_name:this.store.get(id).name,summary:"校验已保存的登录状态"}});
+      : this.queue.add(run, undefined, {key:id,lane:"login",cancelable:true,metadata:{kind:"verification",account_name:this.store.get(id).name,summary:"校验已保存的登录状态"}});
     s.checkingPromise = work.catch(() => {});
     try {
       const value = await work;

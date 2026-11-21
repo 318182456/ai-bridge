@@ -1,19 +1,20 @@
 import {randomUUID} from "node:crypto";
 import {setTimeout as sleep} from "node:timers/promises";
-import {GoogleBrowser} from "./browser.mjs";
+import {GoogleBrowserPool} from "./browser.mjs";
 import {GoogleAccounts} from "./google-store.mjs";
 import {binding,encodeRequest,decodeCatalog,decodeResponse,parse} from "./studio-wire.mjs";
 import {AppError} from "../common.mjs";
 const cancelled=()=>new AppError(499,"请求已取消","cancelled");
 export class BrowserEngine {
- constructor({root,browser,accounts,logger,authorize}={}){this.browser=browser||new GoogleBrowser({dataDir:root,logger});this.accounts=accounts||new GoogleAccounts(root);this.jobs=new Map();this.cursor=0;this.authorize=authorize;}
+ constructor({root,browser,accounts,logger,authorize,vault}={}){this.browser=browser||new GoogleBrowserPool({dataDir:root,logger,authVault:vault});this.accounts=accounts||new GoogleAccounts(root);this.jobs=new Map();this.cursor=0;this.authorize=authorize;this.vault=vault;}
+ async selectAccount(input){const accounts=(await this.accounts.list()).filter(a=>a.enabled&&a.state==="ready"&&a.grants?.aist==="verified"&&(!input.account_id||input.account_id===a.id)&&(a.models||[]).some(m=>m.id===input.model));if(!accounts.length)throw new AppError(503,"没有支持此模型的已验证 AI Studio 账号","no_eligible_account");return accounts[input.account_id?0:this.cursor++%accounts.length].id;}
  async *run(op,input={},signal){
   if(signal?.aborted)throw cancelled();const id=randomUUID();
-  if(op==="accounts"){yield{result:{accounts:(await this.accounts.list()).map(a=>({id:a.id,label:a.email,enabled:a.enabled,state:a.state,benefit_tier:a.tier||"未提供",models:a.models||[],grants:a.grants||{}}))}};return;}
+  if(op==="accounts"){yield{result:{accounts:(await this.accounts.list()).map(a=>({id:a.id,label:a.email,enabled:a.enabled,state:a.state,benefit_tier:a.tier||"未提供",models:a.models||[],grants:a.grants||{},agy_account_id:a.agy_account_id||null,usage:a.usage||{},checked_at:a.checked_at||null}))}};return;}
   if(op==="set_enabled"){const a=await this.accounts.get(input.id);if(input.enabled&&a.state!=="ready")throw new AppError(409,"请先完成实际生成验证");a.enabled=!!input.enabled;await this.accounts.save();yield{result:{updated:true}};return;}
-  if(op==="models"){const rows=(await this.accounts.list()).filter(a=>a.enabled&&a.state==="ready"),all=new Map();for(const a of rows)for(const m of a.models||[])all.set(m.id,m);yield{result:{models:[...all.values()]}};return;}
+  if(op==="models"){const rows=(await this.accounts.list()).filter(a=>a.enabled&&a.state==="ready"&&a.grants?.aist==="verified"),all=new Map();for(const a of rows)for(const m of a.models||[])all.set(m.id,m);yield{result:{models:[...all.values()]}};return;}
   if(op==="login"){yield* this.login(id,input,signal);return;}
-  if(op==="generate"){const accounts=(await this.accounts.list()).filter(a=>a.enabled&&a.state==="ready"&&(!input.account_id||input.account_id===a.id)&&(a.models||[]).some(m=>m.id===input.model));if(!accounts.length)throw new AppError(503,"没有支持此模型的已验证 AI Studio 账号","no_eligible_account");const a=accounts[this.cursor++%accounts.length];for await(const event of this.generate(a,input,signal))yield{event:{...event,account_id:a.id}};return;}
+  if(op==="generate"){const a=await this.accounts.get(await this.selectAccount(input));for await(const event of this.generate(a,input,signal))yield{event:{...event,account_id:a.id}};return;}
   throw new AppError(400,"浏览器操作无效");
  }
  async email(page){
@@ -22,6 +23,7 @@ export class BrowserEngine {
  captureCatalog(page,receive){const handler=async response=>{try{const u=new URL(response.url());if(u.protocol!=="https:"||!["alkalimakersuite-pa.clients6.google.com","alkalimakersuite-pa.googleapis.com"].includes(u.hostname)||!u.pathname.endsWith("/ListModels")||!response.ok())return;const text=await response.text();if(text.length>8*1024*1024)return;receive(decodeCatalog(text));}catch{}};page.on("response",handler);return()=>page.off("response",handler);}
  async *login(id,input,signal){
   const profile=input.account_id||("g_"+randomUUID().replaceAll("-","").slice(0,24));yield{browser_meta:{type:"status",status:"preparing"},native_job:id};
+  const previous=await this.accounts.get(profile).catch(()=>null);let verified=false;await this.browser.checkpoint?.(profile);
   const lease=await this.browser.acquire(profile,signal),context=lease.context,page=await context.newPage();const job={page,context,id};this.jobs.set(id,job);let models=[];const detach=this.captureCatalog(page,value=>{models=value;});const abort=()=>page.close().catch(()=>{});signal?.addEventListener("abort",abort,{once:true});
   try{
    await page.goto("https://aistudio.google.com/prompts/new_chat",{waitUntil:"domcontentloaded",timeout:60000});const until=Date.now()+10*60000;
@@ -29,19 +31,19 @@ export class BrowserEngine {
     const url=new URL(page.url());if(url.hostname==="aistudio.google.com"&&url.pathname.includes("available-regions"))throw new AppError(403,"Google 不支持当前出口地区或账号","region_or_account_unsupported");
     const email=url.hostname==="aistudio.google.com"?await this.email(page):"";
     if(email&&models.length&&await page.locator("ms-prompt-box textarea").isVisible().catch(()=>false)){
-      const old=await this.accounts.get(profile).catch(()=>null);const account={...old,id:profile,email,enabled:false,state:"authenticated",models,grants:{agy:"not_authorized",robin:"not_authorized",...old?.grants,aist:"authenticated"},checked_at:null};await this.accounts.put(account);
+      const old=previous;if(old?.email&&old.email.toLowerCase()!==email.toLowerCase())throw new AppError(409,"请使用该账号原有 Google 身份登录，其他身份请添加新账号","account_identity_mismatch");const account=old?{...old,models,grants:{...old.grants}}:{id:profile,email,enabled:false,state:"authenticated",models,grants:{agy:"not_authorized",robin:"not_authorized",aist:"authenticated"},checked_at:null};if(!old)await this.accounts.put(account);
       yield{browser_meta:{type:"status",status:"saving"},native_job:id};
       const model=models.find(m=>m.capabilities.includes(1)&&/flash/i.test(m.id))||models.find(m=>m.capabilities.includes(1));if(!model)throw new AppError(503,"账号未返回可验证的文本模型","no_test_model");
-      let text="";for await(const event of this.generate(account,{model:model.id,contents:[{role:"user",parts:[{text:"Reply with OK only."}]}],config:{max_output_tokens:8},system:[],tools:{}},signal))if(event.kind==="text")text+=event.text;
+      let text="";for await(const event of this.generate(account,{auth_verification:true,model:model.id,contents:[{role:"user",parts:[{text:"Reply with OK only."}]}],config:{max_output_tokens:8},system:[],tools:{}},signal))if(event.kind==="text")text+=event.text;
       if(!text.trim())throw new AppError(502,"Google 登录成功，但生成验证未返回正文","verification_failed");
-      account.enabled=true;account.state="ready";account.grants.aist="verified";account.checked_at=new Date().toISOString();await this.accounts.put(account);
+      verified=true;this.vault?.mark("google",profile);account.enabled=old?old.enabled:true;account.state="ready";account.grants.aist="verified";account.checked_at=new Date().toISOString();await this.accounts.put(account);
       if(this.authorize)for await(const value of this.authorize({account,context,page,signal,id,owner:input.owner,setPage:p=>{job.page=p;}}))yield value;
       yield{result:{account:{id:profile,email,state:account.state}},native_job:id};return;
     }
     yield{browser_meta:{type:"frame",context:id,width:1280,height:800},native_job:id};const bytes=await page.screenshot({type:"jpeg",quality:65,timeout:10000});yield{browser_binary:bytes.toString("base64"),native_job:id};await sleep(180,undefined,{signal});
    }throw new AppError(408,"Google 登录超过十分钟","login_timeout");
   }catch(e){if(signal?.aborted)throw cancelled();if(e instanceof AppError)throw e;throw new AppError(503,"Google 浏览器登录未完成，请重试","browser_login_failed");}
-  finally{detach();this.jobs.delete(id);signal?.removeEventListener("abort",abort);await page.close().catch(()=>{});lease.release();}
+  finally{detach();this.jobs.delete(id);signal?.removeEventListener("abort",abort);await page.close().catch(()=>{});lease.release();await this.browser.checkpoint?.(profile);if(!verified&&previous&&this.vault)await this.vault.restore("google",profile,{force:true});}
  }
  async *generate(account,request,signal){
   const model=(account.models||[]).find(m=>m.id===request.model);if(!model)throw new AppError(404,"账号模型目录中没有此模型","model_not_found");
@@ -57,7 +59,7 @@ export class BrowserEngine {
    const responsePromise=page.waitForResponse(r=>r.request().method()==="POST"&&["alkalimakersuite-pa.clients6.google.com","alkalimakersuite-pa.googleapis.com"].includes(new URL(r.url()).hostname)&&new URL(r.url()).pathname.endsWith("/GenerateContent"),{timeout:180000});responsePromise.catch(()=>{});
    await page.locator("ms-run-button button").click({timeout:30000});const response=await responsePromise;
    if(!replaced)throw new AppError(502,"未能绑定本次 aist 请求","studio_request_not_bound");if(!response.ok())throw new AppError(response.status(),"AI Studio 拒绝生成请求","studio_request_failed");const body=await response.text();if(body.length>16*1024*1024)throw new AppError(502,"AI Studio 响应超过限制");
-   for(const event of decodeResponse(body))yield event;
+   const events=decodeResponse(body);if(!request.auth_verification&&events.some(e=>e.kind==="text"||e.kind==="function_call"||e.kind==="media"))this.vault?.mark("google",account.id);for(const event of events)yield event;
   }catch(e){if(signal?.aborted)throw cancelled();if(e instanceof AppError)throw e;throw new AppError(502,"AI Studio 页面请求未完成","studio_browser_failed");}
   finally{signal?.removeEventListener("abort",abort);await page.close().catch(()=>{});lease.release();}
  }

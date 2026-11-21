@@ -1,5 +1,5 @@
-<p class="notice">任务在后台执行，切换页面后可回来查看结果。<a href="/panel/queue">打开执行队列</a>可查看内容、等待原因、置顶和取消。</p>
-<div class="split-layout task-layout">
+<div class="section-tabs" role="tablist" aria-label="任务视图"><button id="taskTabCompose" role="tab" aria-controls="taskComposeView" aria-selected="true">任务调试</button><button id="taskTabQueue" role="tab" aria-controls="taskQueueView" aria-selected="false" tabindex="-1">执行队列</button></div>
+<section id="taskComposeView" role="tabpanel" aria-labelledby="taskTabCompose"><div class="split-layout task-layout">
   <section class="card task-compose">
     <div class="section-heading"><div><h2>执行文本任务</h2><p class="muted">选择账号和模型，发送一次真实任务。</p></div><span class="badge">文本任务</span></div>
     <form id="taskForm">
@@ -13,7 +13,7 @@
         <textarea id="prompt" rows="10" required placeholder="例如：用三句话介绍你能帮助我完成哪些任务。" aria-describedby="taskHint"></textarea>
       </fieldset>
       <div id="taskSessionBar" class="task-session-bar" hidden><span id="taskSessionInfo"></span><button id="endTaskSession" type="button" class="secondary small">开始新对话</button></div>
-      <p id="taskHint" class="muted task-hint">默认每次任务独立。开启连续对话后，后续任务会沿用当前上下文。等待期间请保持此页面打开。</p>
+      <p id="taskHint" class="muted task-hint">默认每次任务独立。开启连续对话后，后续任务会沿用当前上下文。任务后台执行，可以切换标签或页面后回来查看。</p>
       <div class="toolbar task-actions">
         <button id="sendTask"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"/></svg><span id="sendTaskLabel">发送任务</span></button>
         <button id="cancelTask" type="button" class="secondary" hidden>取消任务</button>
@@ -38,3 +38,8 @@
     <div id="taskRequest" class="task-request" hidden><span>请求 ID</span><code id="taskRequestId"></code><a href="/panel/records">查看请求记录</a></div>
   </section>
 </div>
+</section><section id="taskQueueView" role="tabpanel" aria-labelledby="taskTabQueue" hidden><section class="card queue-card"><div class="section-heading"><div><h2>执行队列</h2><p class="muted">实时查看请求、登录、校验和额度查询。取消中的任务会等待进程回收后释放位置。</p></div></div>
+<div id="queueSummary" class="summary-strip"></div><div class="filters"><label>查找任务<input id="queueSearch" type="search" placeholder="内容、账号、模型或请求 ID"/></label><label>状态<select id="queueState"><option value="">全部</option><option value="waiting">等待中</option><option value="running">执行中</option><option value="cancelling">取消中</option></select></label></div>
+<p id="queueFeedback" class="feedback" role="status"></p><div class="scroll queue-scroll"><table><thead><tr><th>任务 / 内容摘要</th><th>账号 / 模型</th><th>状态 / 等待原因</th><th>时间</th><th>操作</th></tr></thead><tbody id="queueRows"></tbody></table></div>
+<p class="muted note">内容仅在管理登录内查看，不写入请求日志；完成后队列项移除。网页后台任务的结果可在本页任务调试标签恢复，模型接口仍按请求连接返回。</p></section>
+<dialog id="queueDetail" class="detail-dialog"><div class="dialog-heading"><h2>任务内容</h2><button id="queueCloseDetail" class="secondary small">关闭</button></div><div class="dialog-body"><dl id="queueDetailMeta" class="info-grid"></dl><pre id="queueContent" tabindex="0"></pre><p id="queueConfirmText" hidden></p><button id="queueConfirmCancel" class="danger" hidden>确认取消任务</button></div></dialog></section>

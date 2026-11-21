@@ -44,6 +44,14 @@ export function classifyFailure(text) {
       "Google 已停用此账号的服务，请通过官方渠道申诉",
       "account_suspended",
     );
+  if (/429|quota.exhaust|rate.limit|resource.exhaust/i.test(text))
+    return new AppError(
+      429,
+      "此账号当前限流或额度不足，请查看官方额度",
+      "rate_limited",
+    );
+
+  if(/ECONNRESET|ENOTFOUND|ETIMEDOUT|TLS handshake|certificate verify|connection (?:timed out|reset|refused)/i.test(text))return new AppError(503,"上游连接暂时失败，请稍后重试","upstream_connection_failed");
   if (
     /authentication required|not authenticated|sign.?in required|login required|please (?:log|sign) in/i.test(
       text,
@@ -53,12 +61,6 @@ export function classifyFailure(text) {
       401,
       "此账号尚未登录或授权尚未完成，请在当前账号的“登录 agy”详情中完成官方授权",
       "login_required",
-    );
-  if (/429|quota.exhaust|rate.limit|resource.exhaust/i.test(text))
-    return new AppError(
-      429,
-      "此账号当前限流或额度不足，请查看官方额度",
-      "rate_limited",
     );
   return new AppError(
     502,

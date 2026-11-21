@@ -1,12 +1,22 @@
+import {accountDirectory} from "../components/account-directory.mjs";
+import {mountGoogleLogin} from "../components/google-login.mjs";
 import {el,number as count,fmtDate,note} from "../core.mjs";
 export function mount(ctx){
   const $=ctx.$,text=el,api=ctx.api,refresh=()=>ctx.refresh();
-  let state=ctx.state,active=true,quotaLoop=false,resumed=false;
+  let state=ctx.state,active=true,quotaLoop=false,resumed=false,shared=[];
   const selected=new Set(),expanded=new Map(),panels=new Map(),loginPanels=new Map(),loginStates=new Map(),timers=new Set();
+  const directory=()=>accountDirectory(state.accounts,shared);
+  const googlePanel=$("aistLoginPanel");
+  function locateGoogle(id){
+    const account=directory().find(a=>a.google?.id===id);
+    if(account){if(googlePanel.parentElement===panels.get(account.id))return;const cell=feedbackRow(account.id,"Google 授权");cell.append(googlePanel);}
+    else{$("addAccountPanel").hidden=false;$("googleAddHost").append(googlePanel);}
+  }
+  const googleLogin=mountGoogleLogin(ctx,{onChange:refresh,onOpen:locateGoogle});
   function visibleAccounts(){
     const query=$("accountSearch").value.trim().toLowerCase(),status=$("accountStatus").value;
-    return state.accounts.filter(a=>(!query||(a.name+" "+a.id).toLowerCase().includes(query))&&
-      (!status||(status==="enabled"?a.enabled:status==="disabled"?!a.enabled:!a.checked_at||["login_required","account_suspended"].includes(a.status))));
+    return directory().filter(a=>(!query||[a.identity,a.name,a.id,a.google?.id].join(" ").toLowerCase().includes(query))&&
+      (!status||(status==="enabled"?a.any_enabled:status==="disabled"?!a.any_enabled:!a.checked_at||["login_required","account_suspended"].includes(a.status))));
   }
   function selectionInfo(){$("selectionCount").textContent=selected.size?"已选 "+selected.size+" 个账号":"未选择账号";$("bulkEnable").disabled=$("bulkDisable").disabled=!selected.size;}
   function feedbackRow(id,title){
@@ -17,6 +27,7 @@ export function mount(ctx){
   function renderQuota(account){
     for(const [window,prefix] of [["5h","quota5-"],["weekly","quotaWeek-"]]){
       const cell=$(prefix+account.id);if(!cell)continue;cell.replaceChildren();
+      if(account.google&&!account.native){cell.append(text("small","该后端未提供"));continue;}
       const groups=account.quota?.groups||[];
       if(!groups.length){cell.append(text("small",account.quota_loading?"正在刷新…":account.quota_error?"查询失败":account.checked_at?"待查询":"登录后可查"));if(account.quota_error)cell.title=account.quota_error.message;continue;}
       for(const group of groups){
@@ -59,23 +70,28 @@ export function mount(ctx){
 function renderAccounts() {
   const rows = $("accountRows");
   rows.replaceChildren();
-  $("accountCount").textContent=visibleAccounts().length+" / "+state.accounts.length;
+  $("accountCount").textContent=visibleAccounts().length+" / "+directory().length;
   for (const a of visibleAccounts()) {
     const row = document.createElement("tr");
-    const identity = text("td", a.name);
-    identity.append(text("small", a.id));
+    const identity = text("td", a.identity);
+    if(a.google&&a.name!==a.identity)identity.append(text("small",a.name));
+    identity.append(text("small", a.id),text("small",a.model_count+" 个缓存模型"));
     const names = {
       not_logged_in: "待登录",
       ready: a.enabled ? "已启用" : "已登录 · 待启用",
       account_suspended: "Google 已停用",
-      login_required: "登录已失效",
+      login_required: "需重新确认授权",
+      generation_unverified:"已登录 · 待验证生成",
     };
     const selectCell=text("td"),check=document.createElement("input");
-    check.type="checkbox";check.checked=selected.has(a.id);check.setAttribute("aria-label","选择 "+a.name);
+    check.type="checkbox";check.disabled=!a.native;check.checked=selected.has(a.id);check.setAttribute("aria-label","选择 "+a.name);
     check.onchange=()=>{check.checked?selected.add(a.id):selected.delete(a.id);selectionInfo();};selectCell.append(check);
     const quota5=text("td","","quota-cell"),quotaWeek=text("td","","quota-cell");
     quota5.id="quota5-"+a.id;quotaWeek.id="quotaWeek-"+a.id;
-    row.append(selectCell,identity,text("td",names[a.status]||a.status,a.enabled?"status-ready":"muted"),quota5,quotaWeek,
+    const channels=text("td");
+    if(a.native)channels.append(text("small","agy · "+(names[a.status]||a.status),a.native.enabled?"status-ready":"muted"));
+    if(a.google)for(const id of ["aist","robin"]){const grant=a.google.grants?.[id]||"not_authorized";const label=({verified:a.google.enabled?"已启用":"已验证 · 停用",authenticated:"待验证",not_authorized:"未授权",needs_attention:"需处理"})[grant]||grant;channels.append(text("small",id+" · "+label,grant==="verified"&&a.google.enabled?"status-ready":"muted"));}
+    row.append(selectCell,identity,channels,quota5,quotaWeek,
       text("td",count(a.requests)+" / "+count(a.successes)+" / "+count(a.failures)),text("td",a.token_reports?count(a.total_tokens):"未报告"));
     const ops = document.createElement("td"),
       bar = text("div", "", "row-actions");
@@ -87,10 +103,15 @@ function renderAccounts() {
           const target = feedbackRow(a.id, "操作失败");
           target.append(text("p", e.message, "status-error"));
         });
-      const primary=label==="刷新额度"||label==="启用"||label==="停用"||(label==="登录 agy"&&!a.checked_at);
+      const primary=label==="刷新额度"||label==="补充授权"||(!a.google&&(label==="启用 agy"||label==="停用 agy"||(label==="登录 agy"&&!a.checked_at)));
       (primary?bar:more).append(b);
       if(["starting","running","submitted","checking"].includes(loginStates.get(a.id))&&label!=="登录 agy")b.disabled=true;
     };
+    if(a.google){
+      button("补充授权",()=>googleLogin.begin(a.google.id));
+      button(a.google.enabled?"停用 AI Studio / Robin":"启用 AI Studio / Robin",async()=>{await api("/api/backends/aist/accounts/"+a.google.id,{method:"PATCH",data:{enabled:!a.google.enabled}});await refresh();});
+    }
+    if(a.native){
     button("登录 agy",()=>showLogin(a));
     button("刷新额度",()=>refreshQuota(a.id,true));
     button("校验并测试", async () => {
@@ -102,7 +123,7 @@ function renderAccounts() {
       await refresh();
       feedbackRow(a.id, "模型目录与实际调用均验证通过，可以启用账号。");
     });
-    button(a.enabled ? "停用" : "启用", async () => {
+    button(a.enabled ? "停用 agy" : "启用 agy", async () => {
       await api("/api/accounts/" + a.id, {
         method: "PATCH",
         data: { enabled: !a.enabled },
@@ -149,6 +170,7 @@ function renderAccounts() {
       },
       true,
     );
+    }
     if(more.childElementCount>1)bar.append(more);
     ops.append(bar);
     row.append(ops);
@@ -174,7 +196,7 @@ function renderAccounts() {
     const row = document.createElement("tr"),
       cell = text(
         "td",
-        state.accounts.length?"没有匹配的账号":"还没有账号，添加后完成官方授权即可使用。",
+        directory().length?"没有匹配的账号":"还没有账号，添加后完成官方授权即可使用。",
         "empty",
       );
     cell.colSpan = 8;
@@ -374,25 +396,26 @@ async function showLogin(a,resume=false){
 
 }
 
-  $("showAddAccount").onclick=()=>{$("addAccountPanel").hidden=false;$("accountName").focus();};
+  $("showAddAccount").onclick=()=>{$("addAccountPanel").hidden=false;$("beginGoogleLogin").focus();};
   $("cancelAddAccount").onclick=()=>{$("addAccountPanel").hidden=true;};
+  $("cancelLegacyAdd").onclick=()=>{$("addAccountPanel").hidden=true;};
   $("addForm").onsubmit=async event=>{event.preventDefault();try{
     const a=await api("/api/accounts",{method:"POST",data:{name:$("accountName").value}});
     $("accountName").value="";$("addAccountPanel").hidden=true;await refresh();note("bulkFeedback","已添加 "+a.name+"，点击该行“登录 agy”开始授权。");
   }catch(error){note("accountsFeedback",error.message,true);}};
   $("accountSearch").oninput=renderAccounts;$("accountStatus").onchange=renderAccounts;
   const status=ctx.params.get("status");if(status==="ready")$("accountStatus").value="enabled";else if(status==="needs_login")$("accountStatus").value=status;
-  $("accountSelectAll").onchange=()=>{for(const a of visibleAccounts())$("accountSelectAll").checked?selected.add(a.id):selected.delete(a.id);renderAccounts();selectionInfo();};
+  $("accountSelectAll").onchange=()=>{for(const a of visibleAccounts().filter(a=>a.native))$("accountSelectAll").checked?selected.add(a.id):selected.delete(a.id);renderAccounts();selectionInfo();};
   for(const [id,enabled] of [["bulkEnable",true],["bulkDisable",false]])$(id).onclick=async()=>{try{
     const result=await api("/api/accounts/bulk",{method:"POST",data:{ids:[...selected],enabled}});
     selected.clear();await refresh();selectionInfo();note("bulkFeedback","已更新 "+result.updated+" 个账号"+(result.skipped.length?"，"+result.skipped.length+" 个需先校验":""));
   }catch(error){note("bulkFeedback",error.message,true);}};
   $("refreshAllQuotas").onclick=async()=>{$("refreshAllQuotas").disabled=true;await ensureQuotas(true);$("refreshAllQuotas").disabled=false;};
   return {async render(){
-    state=ctx.state;renderAccounts();selectionInfo();$("accountCount").textContent=visibleAccounts().length+" / "+state.accounts.length;
+    state=ctx.state;shared=(await api("/api/backends/aist/accounts")).accounts||[];renderAccounts();selectionInfo();$("accountCount").textContent=visibleAccounts().length+" / "+directory().length;
     ensureQuotas();
-    if(!resumed){resumed=true;const id=sessionStorage.getItem("agy.lastLogin"),a=state.accounts.find(x=>x.id===id);
+    if(!resumed){resumed=true;await googleLogin.resume();const id=sessionStorage.getItem("agy.lastLogin"),a=state.accounts.find(x=>x.id===id);
       if(a){const view=await api("/api/accounts/"+id+"/login");if(view.state!=="idle")showLogin(a,true);}
     }
-  },cleanup(){active=false;for(const timer of timers)clearTimeout(timer);}};
+  },cleanup(){active=false;googleLogin.cleanup();for(const timer of timers)clearTimeout(timer);}};
 }

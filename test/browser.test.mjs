@@ -40,3 +40,26 @@ test("cold browser preparation invokes the installed Playwright CLI without rely
  const browser=new GoogleBrowser({dataDir:dir,spawnProcess:(command,args,options)=>{started=true;assert.match(args[0],/[\\/]playwright-core[\\/]cli\.js$/);assert.deepEqual(args.slice(1),["install","chromium","--no-shell"]);assert.equal(options.env.ADMIN_PASSWORD,undefined);return spawn(command,[args[0],"--version"],options);}});
  try{await browser.prepare();assert.equal(started,true);assert.equal(browser.installChild,null);assert.equal(browser.status().state,"idle");}finally{await browser.close();await rm(dir,{recursive:true,force:true});}
 });
+
+test("browser pool shares a profile across requests and keeps login/other profiles within its hard bound",async()=>{
+ const {GoogleBrowserPool}=await import('../src/backends/browser.mjs');const root=await mkdtemp(join(tmpdir(),'ai-bridge-pool-'));let active=0,peak=0;
+ const pool=new GoogleBrowserPool({dataDir:root,limit:2,launch:async()=>{active++;peak=Math.max(peak,active);const c=new EventEmitter();c.close=async()=>{await pause(10);active--;c.emit('close');};return c;}});
+ try{
+  const one=await pool.acquire('g_'+'1'.repeat(24)),same=await pool.acquire('g_'+'1'.repeat(24)),two=await pool.acquire('g_'+'2'.repeat(24));assert.equal(pool.status().contexts,2);assert.equal(peak,2);
+  let third=false;const waiting=pool.acquire('g_'+'3'.repeat(24)).then(lease=>{third=true;return lease;});await pause(10);assert.equal(third,false);one.release();assert.equal(third,false);same.release();const three=await waiting;assert.equal(peak,2);two.release();three.release();
+ }finally{await pool.close();await rm(root,{recursive:true,force:true});}assert.equal(active,0);
+});
+
+
+test("failed Google reauthorization preserves the last verified account metadata",async()=>{
+ const {BrowserEngine}=await import('../src/backends/browser-engine.mjs');const {AppError}=await import('../src/common.mjs');
+ const root=await mkdtemp(join(tmpdir(),'ai-bridge-relogin-')),accounts=new GoogleAccounts(root),id='g_'+'4'.repeat(24);
+ const old={id,email:'synthetic@example.invalid',enabled:true,state:'ready',checked_at:'2026-01-01T00:00:00.000Z',models:[{id:'old-model'}],grants:{aist:'verified',agy:'verified',robin:'verified'}};
+ await accounts.put(structuredClone(old));let releases=0,closes=0;
+ const page={goto:async()=>{},url:()=> 'https://aistudio.google.com/prompts/new_chat',locator:()=>({isVisible:async()=>true}),close:async()=>{closes++;}};
+ const engine=new BrowserEngine({accounts,browser:{checkpoint:async()=>{},acquire:async()=>({context:{newPage:async()=>page},release:()=>releases++})}});
+ engine.email=async()=>old.email;engine.captureCatalog=(_page,receive)=>{receive([{id:'new-flash',capabilities:[1]}]);return()=>{};};
+ engine.generate=async function*(){throw new AppError(503,'Synthetic network failure','network_error');};
+ try{await assert.rejects(async()=>{for await(const _ of engine.login('synthetic-job',{account_id:id},new AbortController().signal)){};},{code:'network_error'});assert.deepEqual(await accounts.get(id),old);assert.equal(releases,1);assert.equal(closes,1);}
+ finally{await rm(root,{recursive:true,force:true});}
+});

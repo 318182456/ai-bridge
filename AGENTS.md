@@ -3,9 +3,11 @@
 - 当前仓库由 agy-docker 演进为 ai-bridge，与 agy2api-workers 的数据库、账号和部署无关。用户已确认同一项目内置 agy、Robin、AI Studio，不按 Git 分支分别部署。
 - `npm test` 为本机核心测试；生产环境使用版本化GHCR镜像，NAS用 `docker compose -f compose.nas.yaml up -d`；源码构建仅用于开发。
 - agy 后端仅使用原版 `agy` 子进程，不提取其 OAuth Token。AI Studio 与 Robin 均以本项目 Node.js 代码独立实现，仅参考上游协议，不打包上游服务、Go 或 C++ 模块；不得把未完成的后端或授权状态标记为已就绪。三个后端共享全局调度，按需启动和空闲回收；原生 Linux 安装与 Docker 使用同一代码与持久化结构。
-- 正常请求轮询，全局并发由MAX_CONCURRENCY配置（1–16），同账号串行，登录排他；失败不自动换账号重放；停用/登录失效需明确处理。
+- 正常请求轮询，全局并发由MAX_CONCURRENCY配置（1–16），同账号独立请求可并发，连续对话逐轮串行；登录使用独立位置，仅排他锁定目标账号；失败不自动换账号重放；停用/登录失效需明确处理。
 - 默认请求独立；仅显式session_id复用会话，绑定创建者、账号、模型与工具配置。续接校验完整历史，仅投递新增消息；累计用量换算本轮差量，关闭或过期不自动重建。常驻会话受SESSION_LIMIT、空闲期限和轮数约束，登录前释放空闲会话，取消/失败/停用/撤销时回收。
 - 新增网页接口必须在统一register入口声明public/read/mutation/api权限，保持管理会话与API密钥分离。
 - 调用CLI时不能使用shell=true、拼接命令或任意用户CLI参数；提示词使用标准输入；保持严格审批。
 - 凭据、.env、data、账号授权状态、会话正文与临时验证文件不得提交Git。验证成果应明确区分模拟CLI、本机真实CLI和NAS真实Google调用。
 - 界面遵循DESIGN.md和全局design-md-reference；修改后用Playwright MCP检查真实操作、保存与重载。
+
+- DATABASE_URL 启用时 PG 为持久化源，原 JSON 只用于显式迁移；不要在数据库异常时回退创建空账号。已有授权快照仅在已验证成功后更新，恢复前校验摘要与归档路径。

@@ -106,7 +106,7 @@ test("login code is one-shot, owner-bound, excluded from environment and fully v
     assert.equal(env.ADMIN_PASSWORD, undefined);
     assert.equal(env.API_KEY, undefined);
     assert.equal(env.AGY_CLI_DISABLE_AUTO_UPDATE, "true");
-    assert.equal(q.exclusive, true);
+    assert.equal(q.loginRunning, 1);
     child.stdout.write(
       "Authorize https://accounts.google.com/o/oauth2/auth?state=synthetic\n",
     );
@@ -151,7 +151,7 @@ test("login code is one-shot, owner-bound, excluded from environment and fully v
     await rm(dir, { recursive: true, force: true });
   }
 });
-test("finishing login verifies before stopping and keeps the exclusive barrier until verification ends", async () => {
+test("finishing login holds only the target account until verification ends", async () => {
   const dir = await mkdtemp(join(tmpdir(), "agy-finish-test-"));
   const store = await new Store(dir).init(),
     a = await store.create({ name: "finish" }),
@@ -178,7 +178,7 @@ test("finishing login verifies before stopping and keeps the exclusive barrier u
     );
     assert.ok(manager.current.child);
     assert.equal(manager.view("owner", a.id).state, "running");
-    assert.equal(q.exclusive, true);
+    assert.equal(q.loginRunning, 1);
     assert.ok(
       manager.view("owner", a.id).text.includes("original provider failure"),
     );
@@ -199,7 +199,7 @@ test("finishing login verifies before stopping and keeps the exclusive barrier u
     );
     child.emit("close", 0);
     await tick();
-    assert.equal(otherRan, false);
+    assert.equal(otherRan, true);
     complete({ ok: true });
     assert.deepEqual(await pending, { ok: true });
     await other;
@@ -276,4 +276,12 @@ test("ready saved profiles verify despite historical OAuth output without accept
     assert.equal(probes,1);const view=manager.view("owner",a.id);assert.equal(view.state,"verified");assert.equal(view.can_submit_code,false);assert.equal(view.url,null);
     await manager.current.work;
   } finally {manager.close();await rm(dir,{recursive:true,force:true});}
+});
+
+
+test("delegated verification after a CLI exits reuses the held login slot",async()=>{
+ const q=new SerialQueue(10,1),manager=new LoginManager({queue:q,store:{get:()=>({name:'synthetic'})}}),id='a_'+'1'.repeat(16);
+ manager.current={id,owner:'synthetic-owner',state:'running',raw:'',child:null,withinLogin:true,signal:new AbortController().signal};
+ const value=await q.add(()=>manager.finish('synthetic-owner',id,async()=> 'verified'),AbortSignal.timeout(1000),{lane:'login',key:id});
+ assert.equal(value,'verified');assert.equal(manager.current.state,'verified');
 });

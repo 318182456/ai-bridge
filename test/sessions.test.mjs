@@ -152,7 +152,7 @@ test("closing workers continue to consume capacity until disposal has completed"
   assert.equal(sessions.status.resident,0);
 });
 
-test("exclusive login releases warm CLI workers before launching its interactive process",()=>fixture(async(runner,dir)=>{
+test("account login releases only its target warm CLI worker before launching",()=>fixture(async(runner,dir)=>{
   const store=await new Store(dir).init(),account=await store.create({name:"login"});
   const sessions=new Sessions({runner});
   const turn=sessions.begin(null,"owner",{account:account.id,model:"",kind:"task",prompt:"before-login"});
@@ -163,7 +163,7 @@ test("exclusive login releases warm CLI workers before launching its interactive
   child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();
   let prepared=false;
   const manager=new LoginManager({dataDir:dir,store,queue,
-    beforeLogin:async()=>{assert.equal(queue.exclusive,true);await sessions.closeWhere(()=>true);prepared=true;},
+    beforeLogin:async id=>{assert.equal(queue.loginRunning,1);await sessions.closeWhere(s=>s.account===id);prepared=true;},
     launch:()=>{assert.equal(prepared,true);assert.equal(runner.sessions.size,0);return child;}});
   try{
     manager.start("owner",account.id);

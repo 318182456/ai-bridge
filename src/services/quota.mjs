@@ -29,6 +29,7 @@ export class Quotas {
       try{
         const result=await this.runner.execute(id,{quota:true,signal});
         account.quota=result.quota;account.quota_error=null;
+        if(account.status==="login_required"){account.status="generation_unverified";account.auth_checked_at=new Date().toISOString();}
         await this.store.save();
         this.logger?.info("quota.completed",{account_id:id,count:account.quota.groups.length,duration_ms:Date.now()-started});
       }catch(error){
@@ -36,7 +37,7 @@ export class Quotas {
         await this.store.save();
         this.logger?.warn("quota.failed",{account_id:id,code:error.code||"quota_failed",duration_ms:Date.now()-started});
       }
-    },undefined,{key:id,cancelable:true,metadata:{kind:"quota",account_name:account.name,summary:"查询账号额度"}});
+    },undefined,{sharedKey:id,cancelable:true,metadata:{kind:"quota",account_name:account.name,summary:"查询账号额度"}});
     this.pending.set(id,work);
     const result=work.catch(error=>{account.quota_error={code:error.code||"quota_failed",message:error.message,at:new Date().toISOString()};})
       .finally(()=>this.pending.delete(id)).then(()=>this.view(id));

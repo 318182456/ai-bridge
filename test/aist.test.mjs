@@ -55,3 +55,15 @@ test("AI Studio SSE flushes a waiting comment while the generation is still queu
   unblock();await occupied;let final="";for(;;){const next=await reader.read();if(next.done)break;final+=new TextDecoder().decode(next.value);}assert.match(final,/\[DONE\]/);assert.equal(called,true);assert.equal(app.store.state.backend_usage.aist.successes,1);
  }finally{unblock?.();await occupied;app.tasks.close();await app.backends.close();app.loginManager.close();await app.runner.close();app.server.closeAllConnections();await new Promise(r=>app.server.close(r));await app.store.pending;await rm(dir,{recursive:true,force:true});}
 });
+
+test("HTTP independent requests on one account execute concurrently within the model budget",async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'ai-bridge-http-parallel-'));const runner=new Runner({dataDir:dir,command:process.execPath,prefix:[resolve('test/fixtures/fake-cli.mjs')]});
+ const app=await createApplication({dataDir:dir,password,key,runner,logger:new Logger({sink:()=>{}})});app.queue.concurrency=2;let active=0,peak=0,release;const gate=new Promise(r=>release=r);
+ runner.execute=async()=>{active++;peak=Math.max(peak,active);await gate;active--;return{response:'synthetic answer',usage:{total_tokens:1},model:'gemini-test'};};
+ const a=await app.store.create({name:'synthetic parallel'});Object.assign(app.store.get(a.id),{enabled:true,status:'ready',checked_at:new Date().toISOString(),models:[{id:'gemini-test'}]});await app.store.save();
+ await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+app.server.address().port;
+ const request=()=>fetch(base+'/v1/chat/completions',{method:'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json'},body:JSON.stringify({model:'gemini-test',account_id:a.id,messages:[{role:'user',content:'synthetic independent'}]})});
+ const pending=[request(),request()];
+ try{for(let i=0;i<100&&active<2;i++)await new Promise(r=>setTimeout(r,10));assert.equal(active,2);assert.equal(peak,2);release();const replies=await Promise.all(pending);for(const r of replies){assert.equal(r.status,200);assert.equal((await r.json()).choices[0].message.content,'synthetic answer');}assert.equal(app.store.get(a.id).successes,2);}
+ finally{release();await Promise.allSettled(pending);app.tasks.close();app.upgrades.close();app.loginManager.close();await app.backends.close();await runner.close();app.server.closeAllConnections();await new Promise(r=>app.server.close(r));await app.store.pending;await rm(dir,{recursive:true,force:true});}
+});

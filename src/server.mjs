@@ -1,3 +1,5 @@
+import {Postgres} from "./storage/postgres.mjs";
+import {AuthVault} from "./storage/auth-vault.mjs";
 import {BrowserEngine} from "./backends/browser-engine.mjs";
 import {modelCatalog,publicModels} from "./backends/catalog.mjs";
 import {GoogleGrants} from "./backends/google-grants.mjs";
@@ -24,7 +26,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { Store } from "./store.mjs";
-import { Runner } from "./runner.mjs";
+import { Runner,profilePaths } from "./runner.mjs";
 import { SerialQueue } from "./queue.mjs";
 import { Auth } from "./auth.mjs";
 import { AppError, object, modelId } from "./common.mjs";
@@ -69,12 +71,15 @@ function promptInput(input) {
 }
 export async function createApplication(options = {}) {
   const dataDir = resolve(options.dataDir || process.env.DATA_DIR || "data");
-  const store = options.store || (await new Store(dataDir).init());
+  const storage=options.storage||(process.env.DATABASE_URL?await new Postgres(process.env.DATABASE_URL).open():null);
+  if(storage&&await storage.document("migration-staging")&&!await storage.document("migration-complete")){await storage.close();throw new AppError(409,"PostgreSQL 迁移未完成，请先完成迁移","storage_migration_required");}
+  const store = options.store || (await new Store(dataDir,storage).init().catch(async error=>{await storage?.close();throw error;}));
   const logger=options.logger||new Logger({level:process.env.LOG_LEVEL||store.state.settings.log_level});
+  const authVault=storage?new AuthVault(storage,dataDir,logger):null;
   const runner =
     options.runner ||
     new Runner({
-      dataDir,
+      dataDir,authVault,logger,
       command: process.env.AGY_BIN || "agy",
       timeout: Number(process.env.TASK_TIMEOUT_SECONDS || 180) * 1000,
     });
@@ -97,7 +102,8 @@ export async function createApplication(options = {}) {
     keyrings: runner.keyrings,
     logger,
     verify: (id, log, signal) => verifyAccount(id, signal, log),
-    beforeLogin: () => sessions.closeWhere(() => true),
+    profile: id=>runner.profile?runner.profile(id):profilePaths(dataDir,id),
+    beforeLogin: id => sessions.closeWhere(s=>s.account===id),
   });
   const routes = [];
   function register(method, path, access, handler) {
@@ -114,9 +120,9 @@ export async function createApplication(options = {}) {
   const quotas=new Quotas({store,runner,queue,logger});
   const tasks=new Tasks({queue});
   const backends=new Backends();
-  const googleAccounts=new GoogleAccounts(dataDir),googleGrants=new GoogleGrants(dataDir);
+  const googleAccounts=new GoogleAccounts(dataDir,storage),googleGrants=new GoogleGrants(dataDir,{storage});
   if(options.aistudio)backends.register("aist",options.aistudio);
-  else backends.register("aist",new AIStudio({dataDir,logger,engine:new BrowserEngine({root:dataDir,logger,accounts:googleAccounts})}));
+  else backends.register("aist",new AIStudio({dataDir,logger,engine:new BrowserEngine({root:dataDir,logger,accounts:googleAccounts,vault:authVault})}));
   backends.register("robin",options.robin||new Robin({dataDir,logger,accounts:googleAccounts,tokenProvider:id=>googleGrants.robinToken(id)}));
   const googleAuthorization=new GoogleAuthorization({accounts:googleAccounts,grants:googleGrants,store,loginManager,robin:backends.get("robin")});
   if(!options.aistudio)backends.get("aist").engine.authorize=googleAuthorization.authorize.bind(googleAuthorization);
@@ -177,13 +183,13 @@ export async function createApplication(options = {}) {
         logger.warn("request.failed",{request_id:id,account_id:a.id,model:params.model||"默认模型",status:error.status||500,code:error.code||"internal_error",duration_ms:Date.now()-started});
         throw error;
       }
-    },signal,{key:selected,id,cancelable:true,metadata:{kind:"generation",account_name:context.account_name,model:model||"默认模型",source:context.key_id?"api":"panel",api_key_name:context.key_name||"管理台",summary:params.messages?.findLast(m=>m.role==="user")?.content||params.prompt,content:params.messages?JSON.stringify(params.messages,null,2):params.prompt}});
+    },signal,{sharedKey:selected,key:existing?"session:"+existing.id:null,id,cancelable:true,metadata:{account_id:selected,kind:"generation",account_name:context.account_name,model:model||"默认模型",source:context.key_id?"api":"panel",api_key_name:context.key_name||"管理台",summary:params.messages?.findLast(m=>m.role==="user")?.content||params.prompt,content:params.messages?JSON.stringify(params.messages,null,2):params.prompt}});
   }
   register("GET", "/health", "public", async ({ res }) =>
     send(res, { status: "ok", version }),
   );
   registerPages({register,publicDir});
-  registerAdmin({register,send,body,store,auth,queue,runner,logger,dataDir,version,quotas,sessions,googleAccounts,backends});
+  registerAdmin({register,send,body,store,auth,queue,runner,logger,dataDir,version,quotas,sessions,googleAccounts,backends,storage,authVault});
   registerSessions({register,send,sessions});
   registerQueue({register,send,queue});
   registerBackends({register,send,backends});
@@ -297,6 +303,7 @@ export async function createApplication(options = {}) {
   );
   async function verifyAccount(id, signal, onOutput) {
     const a = store.get(id);
+    const prior={enabled:a.enabled,status:a.status,checked_at:a.checked_at??null,models:a.models};
     await sessions.closeWhere(s => s.account === id);
     let testStarted = null,
       testModel = "";
@@ -349,9 +356,9 @@ export async function createApplication(options = {}) {
       await store.save();
     } catch (e) {
       a.last_error = e.code || "verification_failed";
-      a.enabled = false;
-      a.status = a.last_error;
-      a.checked_at = null;
+      a.last_verification_error={code:a.last_error,at:new Date().toISOString()};
+      if(["login_required","account_suspended"].includes(e.code)){a.enabled=false;a.status=e.code;}else{a.enabled=prior.enabled;a.status=prior.status;}
+      a.checked_at=prior.checked_at;if(prior.checked_at)a.models=prior.models;
       if (testStarted) {
         a.failures++;
         await store.event({
@@ -546,6 +553,7 @@ export async function createApplication(options = {}) {
         );
       }
       const principal = auth.check(req, found.route.access);
+      if(found.route.access!=="public"||url.pathname==="/health")storage?.assertReady();
       await found.route.handler({
         req,
         res,
@@ -585,7 +593,7 @@ export async function createApplication(options = {}) {
   server.headersTimeout = 10000;
   return {
     server,
-    store,
+    store,storage,authVault,
     runner,
     queue,
     auth,
@@ -619,7 +627,7 @@ if (
     app.upgrades.close();
     app.loginManager.close();
     app.server.close();
-    Promise.all([app.store.pending, app.backends.close(), app.runner.close()]).finally(() =>
+    Promise.all([app.store.pending, app.backends.close(), app.runner.close()]).then(()=>app.authVault?.close()).then(()=>app.storage?.close()).finally(() =>
       process.exit(0),
     );
   };

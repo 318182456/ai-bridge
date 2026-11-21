@@ -46,3 +46,21 @@ test("shared backend resources wait visibly without blocking another backend or 
  assert.equal(await other,42);assert.equal(startedB,false);assert.equal(queue.get("b").reason,"等待AI Studio 浏览器");assert.equal(queue.get("b").account_id,null);
  releaseA();await a;await b;assert.equal(startedB,true);assert.equal(queue.activeResources.size,0);assert.equal(queue.running,0);
 });
+
+test("same-account independent requests share reads while login uses its own slot and waits only for that account",async()=>{
+ const queue=new SerialQueue(10,2);let a,b,loginStarted=false,otherStarted=false;
+ const first=queue.add(()=>new Promise(r=>{a=r;}),undefined,{id:"model-a",sharedKey:"account"});
+ const second=queue.add(()=>new Promise(r=>{b=r;}),undefined,{id:"model-b",sharedKey:"account"});
+ await new Promise(r=>setImmediate(r));assert.equal(queue.modelRunning,2);
+ const login=queue.add(async()=>{loginStarted=true;},undefined,{id:"login",key:"account",lane:"login"});
+ const other=queue.add(async()=>{otherStarted=true;},undefined,{id:"other-login",key:"other",lane:"model"});
+ assert.match(queue.get("login").reason,/账号/);a();await first;await new Promise(r=>setImmediate(r));assert.equal(loginStarted,false);assert.equal(otherStarted,true);b();await second;await login;await other;assert.equal(loginStarted,true);assert.equal(queue.running,0);
+});
+test("login on another account runs with a full model budget; delegated credential write drains readers and can be cancelled",async()=>{
+ const queue=new SerialQueue(10,1);let releaseModel,releaseLogin;
+ const model=queue.add(()=>new Promise(r=>releaseModel=r),undefined,{id:"model",sharedKey:"a"});
+ const login=queue.add(()=>new Promise(r=>releaseLogin=r),undefined,{id:"login",key:"b",lane:"login"});
+ await new Promise(r=>setImmediate(r));assert.equal(queue.modelRunning,1);assert.equal(queue.loginRunning,1);
+ const c=new AbortController(),cancelled=queue.acquireWrite("a",c.signal);c.abort();await assert.rejects(cancelled,{code:"cancelled"});
+ const writer=queue.acquireWrite("a");let nextRan=false;const next=queue.add(async()=>{nextRan=true;},undefined,{id:"next",sharedKey:"a"});releaseModel();await model;const releaseWrite=await writer;await new Promise(r=>setImmediate(r));assert.equal(nextRan,false);releaseWrite();await next;releaseLogin();await login;assert.equal(queue.writeOwners.size,0);
+});

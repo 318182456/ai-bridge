@@ -8,6 +8,7 @@ export class AIStudio {
  async catalogEntries(){return(await this.engine.accounts?.list()||[]).flatMap(a=>(a.models||[]).map(model=>({model,account:{id:a.id,name:a.email},available:a.enabled&&a.grants?.aist==="verified",checked_at:a.checked_at})));}
  async recordUsage(id,success,tokens){await this.engine.accounts?.recordUsage(id,"aist",success,tokens);}
  async result(op,input,signal){let result={};for await(const event of this.engine.run(op,input,signal))if(event.result)result=event.result;return result;}
+ async selectAccount(input){return this.engine.selectAccount?this.engine.selectAccount(input):input.account_id||null;}
  async open(path,{signal,json:input}={}){
   if(path==="/v1/models"){const result=await this.result("models",{},signal);return{response:Response.json({object:"list",data:(result.models||[]).map(m=>({id:m.id,object:"model",owned_by:"aist",capabilities:m.capabilities}))}),release:()=>{}};}
   if(path!=="/v1/chat/completions")throw new AppError(400,"不支持此 AI Studio 接口");

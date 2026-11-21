@@ -2,11 +2,9 @@ import {readFile} from "node:fs/promises";
 import {join} from "node:path";
 export const pages={
   overview:{title:"概览",description:"运行状态、请求趋势与账号消耗。"},
-  backends:{title:"后端与授权",description:"管理本机后端、Google 浏览器登录与各渠道授权状态。"},
-  accounts:{title:"账号与额度",description:"管理官方登录状态，查看 5 小时与周额度。"},
+  accounts:{title:"账号与额度",description:"统一管理账号、后端授权、消耗和额度。"},
   models:{title:"模型目录",description:"查看账号实际返回的模型与当前可用性。"},
-  tasks:{title:"任务调试",description:"通过官方 CLI 执行一次真实文本任务。"},
-  queue:{title:"执行队列",description:"查看执行内容、等待原因与顺序，管理排队和在途任务。"},
+  tasks:{title:"任务",description:"提交调试任务，查看执行队列和结果。"},
   records:{title:"请求记录",description:"按账号、模型、API 密钥与状态定位请求。"},
   keys:{title:"API 密钥",description:"为不同项目创建独立密钥，管理名称、到期与消耗。"},
   access:{title:"接口接入",description:"连接客户端，查看支持范围与调用示例。"},
@@ -30,6 +28,7 @@ function nav(active){
 export function registerPages({register,publicDir}){
   register("GET","/","public",async({res})=>{res.writeHead(303,{location:"/panel/overview"});res.end();});
   register("GET","/panel","public",async({res})=>{res.writeHead(303,{location:"/panel/overview"});res.end();});
+  for(const [old,target]of [["backends","/panel/accounts"],["queue","/panel/tasks?view=queue"]])register("GET","/panel/"+old,"public",async({res})=>{res.writeHead(303,{location:target});res.end();});
   for(const [id,page] of Object.entries(pages)){
     register("GET","/panel/"+id,"public",async({res})=>{
       const [shell,content]=await Promise.all([readFile(join(publicDir,"shell.html"),"utf8"),readFile(join(publicDir,"pages",id+".html"),"utf8")]);
@@ -40,5 +39,6 @@ export function registerPages({register,publicDir}){
   const assets=[["/style.css","style.css","text/css"],["/icon.svg","icon.svg","image/svg+xml"],["/icon-180.png","icon-180.png","image/png"],
     ["/js/core.mjs","js/core.mjs","text/javascript"],["/js/shell.mjs","js/shell.mjs","text/javascript"],
     ...Object.keys(pages).map(id=>["/js/pages/"+id+".mjs","js/pages/"+id+".mjs","text/javascript"])];
+  for(const name of ["google-login","account-directory","task-console","queue"])assets.push(["/js/components/"+name+".mjs","js/components/"+name+".mjs","text/javascript"]);
   for(const [path,file,type] of assets)register("GET",path,"public",async({res})=>{res.writeHead(200,{"content-type":type});res.end(await readFile(join(publicDir,file)));});
 }

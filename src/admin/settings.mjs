@@ -13,8 +13,8 @@ export function settingsInput(input){
   }
   return out;
 }
-export function registerSettings({register,send,body,store,queue,runner,logger,dataDir,version}){
-  const view=()=>({settings:store.state.settings,runtime:{version,node:process.version,concurrency:queue.concurrency,queue_limit:queue.limit,task_timeout_seconds:runner.timeout/1000,data_dir:dataDir,
+export function registerSettings({register,send,body,store,queue,runner,logger,dataDir,version,storage,authVault}){
+  const view=()=>({settings:store.state.settings,runtime:{storage_mode:storage?"postgresql":"file",auth_storage:authVault?.status()||null,version,node:process.version,concurrency:queue.concurrency,queue_limit:queue.limit,task_timeout_seconds:runner.timeout/1000,data_dir:dataDir,
     log_level:process.env.LOG_LEVEL||store.state.settings.log_level,log_level_locked:!!process.env.LOG_LEVEL,api_key_source:".env / API_KEY"}});
   register("GET","/api/settings","read",async({res})=>send(res,view()));
   register("PATCH","/api/settings","mutation",async({req,res})=>{

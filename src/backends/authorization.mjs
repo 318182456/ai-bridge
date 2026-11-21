@@ -9,8 +9,9 @@ export class GoogleAuthorization {
   if(account.grants?.agy!=="verified"){
    let profile=account.agy_account_id?this.store.get(account.agy_account_id):null;
    if(!profile){profile=await this.store.create({name:account.email});account.agy_account_id=profile.id;await this.accounts.put(account);}
-   this.loginManager.start(owner,profile.id,{withinExclusive:true,signal});let submitted=false,expected=null;
+   const release=await this.loginManager.queue.acquireWrite(profile.id,signal);let submitted=false,expected=null;
    try{
+    this.loginManager.start(owner,profile.id,{withinLogin:true,signal});
     const until=Date.now()+10*60000;
     while(Date.now()<until){if(signal.aborted)throw new AppError(499,"授权已取消","cancelled");const state=this.loginManager.view(owner,profile.id);
      if(state.state==="verified"){await this.store.patch(profile.id,{enabled:true});account.grants.agy="verified";await this.accounts.put(account);break;}
@@ -20,7 +21,7 @@ export class GoogleAuthorization {
      yield{browser_meta:{type:"status",status:submitted?"saving":"waiting"},native_job:id};for(const value of await frame(page,id))yield value;await sleep(250,undefined,{signal});
     }
     if(account.grants.agy!=="verified")throw new AppError(408,"agy 授权超时");
-   }catch(error){account.grants.agy="needs_attention";await this.accounts.put(account);try{this.loginManager.stop(owner,profile.id);}catch{}if(signal.aborted)throw error;}finally{const current=this.loginManager.current;if(current?.owner===owner&&current.id===profile.id)await current.work;}
+   }catch(error){account.grants.agy="needs_attention";await this.accounts.put(account);try{this.loginManager.stop(owner,profile.id);}catch{}if(signal.aborted)throw error;}finally{const current=this.loginManager.current;try{if(current?.owner===owner&&current.id===profile.id)await current.work;}finally{release();}}
   }
   if(account.grants?.robin!=="verified"){
    try{

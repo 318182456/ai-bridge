@@ -2,8 +2,8 @@ import {normalizeQuota} from "./services/quota.mjs";
 import { Keyrings } from "./keyrings.mjs";
 import { StringDecoder } from "node:string_decoder";
 import { spawn } from "node:child_process";
-import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, writeFile, readFile, rm, rename } from "node:fs/promises";
+import { join,basename } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AppError, accountId, classifyFailure, modelId } from "./common.mjs";
 import {CliConversation} from "./cli-conversation.mjs";
@@ -16,7 +16,9 @@ function cliEnvironment(profile, work) {
   return Object.assign(env, profile.env, {LANG: "C.UTF-8", NO_COLOR: "1", TERM: "dumb",
     AGY_CLI_DISABLE_AUTO_UPDATE: "true", TMPDIR: work, TEMP: work, TMP: work});
 }
-export async function profilePaths(dataDir, id) {
+const profileWrites=new Map();
+export async function profilePaths(dataDir,id){const key=join(dataDir,"accounts",accountId(id),"home");const work=(profileWrites.get(key)||Promise.resolve()).catch(()=>{}).then(()=>prepareProfile(dataDir,id));profileWrites.set(key,work);try{return await work;}finally{if(profileWrites.get(key)===work)profileWrites.delete(key);}}
+async function prepareProfile(dataDir, id) {
   accountId(id);
   const home = join(dataDir, "accounts", id, "home");
   await mkdir(join(home, ".gemini", "antigravity-cli"), {
@@ -31,15 +33,11 @@ export async function profilePaths(dataDir, id) {
     if (e.code !== "ENOENT") throw e;
   }
   // ASVS V1.2.5: text-only execution keeps CLI tool approvals strict; never enable YOLO.
-  await writeFile(
-    settings,
-    JSON.stringify({
-      ...old,
-      toolPermission: "strict",
-      allowNonWorkspaceAccess: false,
-    }),
-    { mode: 0o600 },
-  );
+  if(old.toolPermission!=="strict"||old.allowNonWorkspaceAccess!==false){
+    const temp=settings+"."+randomUUID()+".tmp";
+    await writeFile(temp,JSON.stringify({...old,toolPermission:"strict",allowNonWorkspaceAccess:false}),{mode:0o600});
+    await rename(temp,settings);
+  }
   return {
     home,
     env: {
@@ -54,18 +52,19 @@ export async function profilePaths(dataDir, id) {
 }
 export class Runner {
   constructor({
-    dataDir,
+    dataDir,authVault=null,logger=null,
     command = "agy",
     prefix = [],
     timeout = 180000,
     outputLimit = 4 * 1024 * 1024,
   }) {
-    Object.assign(this, { dataDir, command, prefix, timeout, outputLimit });
+    Object.assign(this, { dataDir, command, prefix, timeout, outputLimit,authVault,logger });
     this.activePids = new Set();
     this.sessions = new Map();
     this.keyrings =
-      process.platform === "linux" && command === "agy" ? new Keyrings() : null;
+      process.platform === "linux" && ["agy","antigravity"].includes(basename(command)) ? new Keyrings({onIdle:(id)=>this.authVault?.capture("agy",id)}) : null;
   }
+  async profile(id){if(!this.keyrings?.entries.has(id))await this.authVault?.restore("agy",id);return profilePaths(this.dataDir,id);}
   async execute(
     id,
     { prompt, model = "", probe = false, signal, onOutput, schema, effort, quota = false, sessionId } = {},
@@ -77,7 +76,7 @@ export class Runner {
       if (probe || quota) throw new AppError(400, "查询命令不能复用对话会话");
       return this.executeSession(id, sessionId, {prompt, model, signal, onOutput, schema, effort});
     }
-    const profile = await profilePaths(this.dataDir, id);
+    const profile = await this.profile(id);
     const work = join(this.dataDir, "work", randomUUID());
     await mkdir(work, { recursive: true, mode: 0o700 });
     const env = cliEnvironment(profile, work);
@@ -226,6 +225,7 @@ export class Runner {
               const n = result.usage?.[key];
               if (Number.isFinite(n) && n >= 0) usage[key] = n;
             }
+            this.authVault?.mark("agy",id);
             resolve({
               response: result.response,
               ...(schema != null ? {structured_output: result.structured_output} : {}),
@@ -280,10 +280,11 @@ export class Runner {
       throw new AppError(409, "会话账号、模型和生成配置不可更改", "session_mismatch");
     const worker = await entry.ready;
     const result = await worker.turn(options);
+    this.authVault?.mark("agy",id);
     return {...result, model: options.model || result.model};
   }
   async openSession(id, sessionId, {model, schema, effort}, entry) {
-    const profile = await profilePaths(this.dataDir, id);
+    const profile = await this.profile(id);
     const work = join(this.dataDir, "work", randomUUID());
     await mkdir(work, {recursive: true, mode: 0o700});
     let keyring;

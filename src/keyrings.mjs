@@ -13,7 +13,8 @@ import { randomBytes } from "node:crypto";
 import { AppError } from "./common.mjs";
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 export class Keyrings {
-  constructor() {
+  constructor({onIdle=null}={}) {
+    this.onIdle=onIdle;
     this.entries = new Map();
   }
   async acquire(id, profile) {
@@ -23,7 +24,7 @@ export class Keyrings {
       return this.acquire(id, profile);
     }
     if (!e) {
-      e = { refs: 0, children: [], runtime: null };
+      e = { id,refs: 0, children: [], runtime: null };
       this.entries.set(id, e);
       e.ready = this.start(e, profile).catch(async (error) => {
         await this.dispose(e);
@@ -199,6 +200,7 @@ export class Keyrings {
       });
     }
     if (e.runtime) await rm(e.runtime, { recursive: true, force: true });
+    await this.onIdle?.(e.id);
   }
   async close() {
     await Promise.all([...this.entries.values()].map((e) => this.dispose(e)));

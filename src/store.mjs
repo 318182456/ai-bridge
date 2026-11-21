@@ -4,7 +4,8 @@ import { randomBytes } from "node:crypto";
 import { defaultSettings } from "./admin/settings.mjs";
 import { AppError, accountId, object, equalSecret } from "./common.mjs";
 export class Store {
-  constructor(dir) {
+  constructor(dir,storage=null) {
+    this.storage=storage;
     this.dir = dir;
     this.path = join(dir, "state.json");
     this.state = { accounts: [], cursor: 0, events: [], keys: [], settings: {...defaultSettings}, backend_usage:{aist:freshUsage(),robin:freshUsage()}, master_usage: freshUsage() };
@@ -13,8 +14,9 @@ export class Store {
   async init() {
     await mkdir(this.dir, { recursive: true, mode: 0o700 });
     try {
-      const loaded = JSON.parse(await readFile(this.path, "utf8"));
-      this.state = {...this.state,...loaded,backend_usage:{...this.state.backend_usage,...loaded.backend_usage},settings:{...defaultSettings,...loaded.settings}};
+      const loaded = this.storage?await this.storage.loadState():JSON.parse(await readFile(this.path,"utf8"));
+      if(!loaded&&this.storage){try{await readFile(this.path);throw new AppError(409,"检测到本地数据，请先执行 PostgreSQL 迁移","storage_migration_required");}catch(e){if(e.code!=="ENOENT")throw e;}}
+      this.state = {...this.state,...loaded,backend_usage:{...this.state.backend_usage,...loaded?.backend_usage},settings:{...defaultSettings,...loaded?.settings}};
     } catch (e) {
       if (e.code !== "ENOENT") throw e;
     }
@@ -29,6 +31,7 @@ export class Store {
   async save() {
     this.prune();
     const data = JSON.stringify(this.state);
+    if(this.storage){this.pending=this.pending.catch(()=>{}).then(()=>this.storage.saveState(JSON.parse(data)));return this.pending;}
     this.pending = this.pending.catch(() => {}).then(async () => {
       const temp = this.path + ".tmp";
       await writeFile(temp, data, { mode: 0o600 });
@@ -88,7 +91,7 @@ export class Store {
     if (input.enabled !== undefined) {
       if (typeof input.enabled !== "boolean")
         throw new AppError(400, "启用状态必须为布尔值");
-      if(input.enabled&&["login_required","account_suspended"].includes(a.status))throw new AppError(409,"请重新完成登录校验后再启用");
+      if(input.enabled&&["login_required","account_suspended","generation_unverified"].includes(a.status))throw new AppError(409,"请重新完成登录校验后再启用");
       if (input.enabled && (!a.models.length || !a.checked_at))
         throw new AppError(409, "请先完成校验并测试");
       a.enabled = input.enabled;

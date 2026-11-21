@@ -14,7 +14,7 @@ async function fixture(action){
  runner:new Runner({dataDir:dir,command:process.execPath,prefix:[resolve("test/fixtures/fake-cli.mjs")],timeout:3000})});
  await new Promise(r=>app.server.listen(0,"127.0.0.1",r));const origin="http://127.0.0.1:"+app.server.address().port;
  let cookie="",csrf="";
- const call=(path,{method="GET",data,headers={}}={})=>fetch(origin+path,{method,headers:{cookie,origin,"x-csrf-token":csrf,...(data!==undefined?{"content-type":"application/json"}:{}),...headers},body:data!==undefined?JSON.stringify(data):undefined});
+ const call=(path,{method="GET",data,headers={},redirect="follow"}={})=>fetch(origin+path,{method,redirect,headers:{cookie,origin,"x-csrf-token":csrf,...(data!==undefined?{"content-type":"application/json"}:{}),...headers},body:data!==undefined?JSON.stringify(data):undefined});
  const login=async()=>{const res=await call("/auth/login",{method:"POST",data:{password}});cookie=res.headers.get("set-cookie").split(";")[0];csrf=(await res.json()).csrf;};
  const account=async(name="test")=>{const a=await(await call("/api/accounts",{method:"POST",data:{name}})).json();await call("/api/accounts/"+a.id+"/verify",{method:"POST",data:{}});await call("/api/accounts/"+a.id,{method:"PATCH",data:{enabled:true}});return a;};
  try{await login();await action({app,call,account,logs,dir,origin});}
@@ -103,4 +103,9 @@ test("background task and queue APIs require session/CSRF, retain results and au
  assert.equal((await call("/api/tasks/"+task.id,{headers:{cookie:foreign}})).status,404);
  assert.equal((await call("/api/tasks/"+task.id,{method:"DELETE",data:{},headers:{"x-csrf-token":""}})).status,403);
  assert.ok(app.store.state.events.some(e=>e.id===task.id));
+}));
+
+test("old duplicate page URLs redirect to the canonical account and task destinations",()=>fixture(async({call})=>{
+ for(const [path,target]of [["backends","/panel/accounts"],["queue","/panel/tasks?view=queue"]]){const response=await call("/panel/"+path,{redirect:"manual"});assert.equal(response.status,303);assert.equal(response.headers.get("location"),target);}
+ const html=await(await call("/panel/accounts")).text();assert.equal((html.match(/class="nav-link/g)||[]).length,8);assert.ok(!html.includes('href="/panel/backends"'));assert.equal((html.match(/id="accountRows"/g)||[]).length,1);assert.ok(!html.includes('id="aistAccountRows"'));
 }));

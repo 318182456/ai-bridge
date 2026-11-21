@@ -3,12 +3,12 @@ import {AppError} from "../common.mjs";
 const sleep=(ms,signal)=>new Promise((resolve,reject)=>{const done=()=>{clearTimeout(timer);signal?.removeEventListener("abort",abort);resolve();};const abort=()=>{clearTimeout(timer);signal?.removeEventListener("abort",abort);reject(new AppError(499,"登录已取消","cancelled"));};const timer=setTimeout(done,ms);signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)abort();});
 export class BackendAccounts {
   constructor({backends,queue,sessions,logger}){Object.assign(this,{backends,queue,sessions,logger});this.login=null;}
-  view(owner){const job=this.login;if(!job||job.owner!==owner)throw new AppError(404,"当前登录没有进行中的后端授权","login_not_found");return{id:job.id,state:job.state,view:job.remoteView||null,items:job.items||[],error:job.error||null};}
+  view(owner){const job=this.login;if(!job||job.owner!==owner)throw new AppError(404,"当前登录没有进行中的后端授权","login_not_found");return{id:job.id,state:job.state,view:job.remoteView||null,account_id:job.account||null,items:job.items||[],error:job.error||null};}
   start(owner,account){
     if(this.login&&["waiting","running"].includes(this.login.state))throw new AppError(409,"已有 Google 登录任务，请先完成或取消");
     const job=this.login={id:randomUUID(),view:randomUUID(),owner,state:"waiting",controller:new AbortController(),account};
     this.queue.add(async signal=>{
-      const backend=this.backends.get("aist");job.state="running";await this.sessions?.closeWhere(()=>true);
+      const backend=this.backends.get("aist");job.state="running";
       try{
         const path=account?"/api/accounts/"+encodeURIComponent(account)+"/login":"/api/accounts";
         const data=await backend.admin(path,{method:"POST",json:{view:job.view,owner,...(!account?{locale:"zh-CN",timezone:"Asia/Shanghai",proxy:""}:{})},signal});
@@ -28,7 +28,7 @@ export class BackendAccounts {
         if(job.remoteId&&job.state!=="done")await backend.admin("/api/accounts/tasks/"+encodeURIComponent(job.remoteId),{method:"DELETE"}).catch(()=>{});
         job.remoteView=null;
       }
-    },job.controller.signal,{id:job.id,exclusive:true,cancelable:true,metadata:{kind:"login",account_name:"Google / AI Studio",summary:"Google 浏览器授权"}}).catch(error=>{job.state=error.code==="cancelled"?"cancelled":"failed";job.error=error instanceof AppError?error.message:"后端授权失败";}).finally(()=>{this.logger?.info("backend.login_finished",{stage:"aist",code:job.state});});
+    },job.controller.signal,{id:job.id,key:account||null,lane:"login",cancelable:true,metadata:{kind:"login",account_name:"Google / AI Studio",summary:"Google 浏览器授权"}}).catch(error=>{job.state=error.code==="cancelled"?"cancelled":"failed";job.error=error instanceof AppError?error.message:"后端授权失败";}).finally(()=>{this.logger?.info("backend.login_finished",{stage:"aist",code:job.state});});
     return this.view(owner);
   }
   authorizeView(owner,view){const job=this.login;if(!job||job.owner!==owner||job.remoteView!==view||job.state!=="running")throw new AppError(404,"登录窗口不属于当前会话","login_not_found");}
