@@ -14,17 +14,19 @@ CREATE TABLE IF NOT EXISTS ai_bridge.auth_profiles(kind text NOT NULL,id text NO
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==="object"?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 const hash=value=>createHash("sha256").update(Buffer.isBuffer(value)||typeof value==="string"?value:JSON.stringify(canonical(value))).digest("hex");
 export class Postgres extends EventEmitter {
- constructor(url,{pool}={}){
-  super();this.mode="postgresql";this.pool=pool||new pg.Pool({connectionString:url,max:4,connectionTimeoutMillis:5000,idleTimeoutMillis:30000,statement_timeout:15000,keepAlive:true,keepAliveInitialDelayMillis:10000});
+ constructor(url,{pool,reconnectMs=5000}={}){
+  super();if(!Number.isInteger(reconnectMs)||reconnectMs<1||reconnectMs>60000)throw Error("Invalid reconnect interval");this.reconnectMs=reconnectMs;
+  this.mode="postgresql";this.pool=pool||new pg.Pool({connectionString:url,max:4,connectionTimeoutMillis:5000,idleTimeoutMillis:30000,statement_timeout:15000,keepAlive:true,keepAliveInitialDelayMillis:10000});
   this.pool.on?.('error',()=>this.setAvailable(false));this.pending=Promise.resolve();this.saved=null;this.closed=false;this.available=false;this.clients=new Set();
  }
  // No dedicated session or global singleton lock: pg.Pool replaces broken connections in this process.
  // ASVS 16.5.3: preserve memory/PG data, fail database-dependent requests while offline, never replay writes.
  async open(){try{await this.query(ddl);return this;}catch(error){await this.close();throw error;}}
- setAvailable(value){if(this.closed||this.available===value)return;this.available=value;this.emit(value?'reconnected':'disconnected');}
+ setAvailable(value){if(this.closed||this.closing)return;const changed=this.available!==value;this.available=value;if(value){clearTimeout(this.retryTimer);this.retryTimer=null;}else this.scheduleRecovery();if(changed)this.emit(value?'reconnected':'disconnected');}
+ scheduleRecovery(){if(this.closed||this.closing||this.available||this.retryTimer||this.recovering)return;this.retryTimer=setTimeout(()=>{this.retryTimer=null;this.recovering=this.health().catch(()=>{}).finally(()=>{this.recovering=null;this.scheduleRecovery();});},this.reconnectMs);this.retryTimer.unref?.();}
  assertOpen(){if(this.closed)throw unavailable();}
  assertReady(){this.assertOpen();if(!this.available)throw unavailable();}
- async health(){await this.query('SELECT 1');}
+ async health(){if(this.probe)return this.probe;const work=this.query('SELECT 1');this.probe=work;try{await work;}finally{if(this.probe===work)this.probe=null;}}
  async connect(){
   this.assertOpen();let client;try{client=await this.pool.connect();}catch{this.setAvailable(false);throw unavailable();}
   if(this.closed){client.release(true);throw unavailable();}
@@ -61,7 +63,7 @@ export class Postgres extends EventEmitter {
  async profile(kind,id){return(await this.query("SELECT archive,checksum,metadata,revision FROM ai_bridge.auth_profiles WHERE kind=$1 AND id=$2",[kind,id])).rows[0]||null;}
  async putProfile(kind,id,archive,metadata){const checksum=hash(archive);await this.query("INSERT INTO ai_bridge.auth_profiles(kind,id,checksum,archive,metadata) VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(kind,id) DO UPDATE SET checksum=EXCLUDED.checksum,archive=EXCLUDED.archive,metadata=EXCLUDED.metadata,revision=ai_bridge.auth_profiles.revision+1,updated_at=now() WHERE ai_bridge.auth_profiles.checksum<>EXCLUDED.checksum",[kind,id,checksum,archive,JSON.stringify(metadata)]);return checksum;}
  async deleteProfile(kind,id){await this.query("DELETE FROM ai_bridge.auth_profiles WHERE kind=$1 AND id=$2",[kind,id]);}
- async close(){if(this.closed)return;await this.pending.catch(()=>{});this.closed=true;this.available=false;await this.pool.end().catch(()=>{});}
+ async close(){if(this.closed)return;this.closing=true;clearTimeout(this.retryTimer);this.retryTimer=null;await this.pending.catch(()=>{});this.closed=true;this.available=false;await this.pool.end().catch(()=>{});}
 }
 
 function connectionFailure(error){return /^(08|57P0|ECONN|EPIPE|ETIMEDOUT|ENOTFOUND)/.test(String(error?.code||''))||/connection (?:terminated|error)|not queryable|client was closed/i.test(String(error?.message||''));}

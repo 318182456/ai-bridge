@@ -24,3 +24,7 @@ test('database disconnect does not stop the process; explicit service signals st
 test('explicit shutdown remains bounded even if a provider stalls',async()=>{
  const t=application({hang:true});let deadline;const c=manageProcess(t.app,{runtime:t.runtime,setTimer:f=>(deadline=f,{unref(){}}),clearTimer(){}});void c.stop(0);await new Promise(r=>setImmediate(r));deadline();assert.ok(t.calls.includes('exit:0'));
 });
+
+test('background retry restores the same process even when nobody calls the health endpoint',async()=>{
+ const pool=new Pool(),db=await new Postgres('synthetic',{pool,reconnectMs:5}).open();pool.offline=true;await assert.rejects(db.health(),{code:'storage_unavailable'});const recovered=new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(Error('automatic reconnect timeout')),1000);db.once('reconnected',()=>{clearTimeout(timeout);resolve();});});pool.offline=false;await recovered;db.assertReady();assert.equal(db.closed,false);await db.close();assert.equal(db.retryTimer,null);
+});
