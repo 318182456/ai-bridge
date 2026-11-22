@@ -3,6 +3,7 @@ import { AppError } from "../src/common.mjs";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import {posix} from "node:path";
 import { join, resolve } from "node:path";
 import { createApplication } from "../src/server.mjs";
 import { Runner } from "../src/runner.mjs";
@@ -412,3 +413,12 @@ test("client tool calls survive CLI structure, HTTP/SSE and a matching tool-resu
       {tools, messages, tool_choice: {type: "function", function: {name: "unknown"}}},
     ]) assert.equal((await request(data)).status, 400);
   }));
+
+
+test('every first-party ES module import is delivered by a registered public JavaScript route',()=>appTest(async({call})=>{
+ const pending=['/js/shell.mjs',...['accounts','access','keys','models','overview','records','settings','tasks'].map(id=>'/js/pages/'+id+'.mjs')],seen=new Set();
+ while(pending.length){const path=pending.pop();if(seen.has(path))continue;seen.add(path);const response=await call(path,{session:false});assert.equal(response.status,200,path);assert.match(response.headers.get('content-type'),/javascript/,path);const source=await response.text();
+  for(const match of source.matchAll(/(?:from\s*|import\s*)["'](\.[^"']+\.mjs)["']/g))pending.push(posix.normalize(posix.join(posix.dirname(path),match[1])));
+ }
+ assert.ok(seen.has('/js/components/account-actions.mjs'));
+}));
