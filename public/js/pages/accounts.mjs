@@ -1,3 +1,4 @@
+import {createAccountActions,accountBackendStates} from '../components/account-actions.mjs';
 import {mountBrowserSync} from "../components/browser-sync.mjs";
 import {accountDirectory} from "../components/account-directory.mjs";
 import {el,number as count,fmtDate,note} from "../core.mjs";
@@ -70,38 +71,18 @@ function renderAccounts() {
     const identity = text("td", a.identity);
     if(a.google&&a.name!==a.identity)identity.append(text("small",a.name));
     identity.append(text("small", a.id),text("small",a.model_count+" 个缓存模型"));
-    const names = {
-      not_logged_in: "待登录",
-      ready: a.enabled ? "已启用" : "已登录 · 待启用",
-      account_suspended: "Google 已停用",
-      login_required: "需重新确认授权",
-      generation_unverified:"已登录 · 待验证生成",
-    };
     const selectCell=text("td"),check=document.createElement("input");
     check.type="checkbox";check.disabled=!a.native;check.checked=selected.has(a.id);check.setAttribute("aria-label","选择 "+a.name);
     check.onchange=()=>{check.checked?selected.add(a.id):selected.delete(a.id);selectionInfo();};selectCell.append(check);
     const quota5=text("td","","quota-cell"),quotaWeek=text("td","","quota-cell");
     quota5.id="quota5-"+a.id;quotaWeek.id="quotaWeek-"+a.id;
-    const channels=text("td");
-    if(a.native)channels.append(text("small","agy · "+(names[a.status]||a.status),a.native.enabled?"status-ready":"muted"));
-    if(a.google&&!a.native)channels.append(text("small","agy · 未关联 / 未登录","muted"));
-    if(a.google)for(const id of ["aist","robin"]){const grant=a.google.grants?.[id]||"not_authorized";const enabled=a.google.backend_enabled?.[id]??a.google.enabled;const verification=a.google.verification?.[id];const label=grant==="not_authorized"?"未授权":!enabled?"已停用":verification?.state==="failed"?"校验失败："+verification.message:({verified:enabled?"已启用":"已验证 · 停用",authenticated:"已授权 · 待校验",synced:"Cookie 已同步 · 待校验",not_authorized:"未授权",needs_attention:"需处理"})[grant]||grant;channels.append(text("small",id+" · "+label,enabled&&verification?.state==="failed"?"status-error":grant==="verified"&&enabled?"status-ready":"muted"));}
+    const statuses=accountBackendStates(a),channels=text("td","","account-backend-status");
+    for(const id of ['aist','robin','agy']){if(!a.google&&id!=='agy')continue;const status=statuses[id],line=text('div','','account-backend-line');line.append(text('span',id==='aist'?'AIST':id==='robin'?'Robin':'agy','backend-short-name'),text('span',status.label,status.tone));channels.append(line);}
     row.append(selectCell,identity,channels,quota5,quotaWeek,
       text("td",count(a.requests)+" / "+count(a.successes)+" / "+count(a.failures)),text("td",a.token_reports?count(a.total_tokens):"未报告"));
-    const ops = document.createElement("td"),
-      bar = text("div", "", "row-actions");
-    const more=text("details","","action-menu");more.append(text("summary","更多"));
-    const button = (label, action, danger = false) => {
-      const b = text("button", label, "secondary small" + (danger ? " danger" : ""));
-      b.onclick = () =>
-        action().catch((e) => {
-          const target = feedbackRow(a.id, "操作失败");
-          target.append(text("p", e.message, "status-error"));
-        });
-      const primary=label==="登录 agy"||label==="刷新额度"||label==="本机登录 AIST"||label==="本机登录 Robin"||(!a.google&&(label==="启用 agy"||label==="停用 agy"||(label==="登录 agy"&&!a.checked_at)));
-      (primary?bar:more).append(b);
-      if(["starting","running","submitted","checking"].includes(loginStates.get(a.id))&&label!=="登录 agy")b.disabled=true;return b;
-    };
+    const ops=document.createElement('td');
+    const actions=createAccountActions({account:a,locked:["starting","running","submitted","checking"].includes(loginStates.get(a.id)),onError:e=>feedbackRow(a.id,'操作失败').append(text('p',e.message,'status-error')),onOpen:()=>{for(const [id,title]of expanded)if(title==='后端管理'&&id!==a.id)expanded.delete(id);expanded.set(a.id,'后端管理');loginPanels.delete(a.id);renderAccounts();document.getElementById('detail-'+a.id)?.querySelector('button')?.focus();}});
+    const button=actions.add;
     button("改名", async () => {
       const cell = feedbackRow(a.id, "修改账号名称");
       const input = document.createElement("input");
@@ -125,23 +106,23 @@ function renderAccounts() {
       input.focus();
     });
     if(a.google){
-      button("本机登录 AIST",()=>localLogin.begin(a.google.id,"aist"));
-      button("本机登录 Robin",()=>localLogin.begin(a.google.id,"robin"));
-      for(const [backend,label] of [["aist","AIST"],["robin","Robin"]])button("校验并测试 "+label,async()=>{const cell=feedbackRow(a.id,"正在读取 "+label+" 模型目录并进行一次实际测试…");try{const result=await api("/api/backends/"+backend+"/accounts/"+a.google.id+"/verify",{method:"POST",data:{}});await refresh();feedbackRow(a.id,label+" 校验通过").append(text("p",result.model+" · "+result.models+" 个模型，已完成一次实际生成。"));}catch(error){await refresh();feedbackRow(a.id,label+" 校验失败").append(text("p",error.message,"status-error"));}});
+      button("登录 / 更新凭据",()=>localLogin.begin(a.google.id,"aist"),{backend:"aist",kind:"login"});
+      button("登录 / 更新凭据",()=>localLogin.begin(a.google.id,"robin"),{backend:"robin",kind:"login"});
+      for(const [backend,label] of [["aist","AIST"],["robin","Robin"]])button("校验并测试",async()=>{const cell=feedbackRow(a.id,"正在读取 "+label+" 模型目录并进行一次实际测试…");try{const result=await api("/api/backends/"+backend+"/accounts/"+a.google.id+"/verify",{method:"POST",data:{}});await refresh();feedbackRow(a.id,label+" 校验通过").append(text("p",result.model+" · "+result.models+" 个模型，已完成一次实际生成。"));}catch(error){await refresh();feedbackRow(a.id,label+" 校验失败").append(text("p",error.message,"status-error"));}},{backend,kind:"verify"});
 
-      for(const [id,label]of [["aist","AIST"],["robin","Robin"]]){const enabled=a.google.backend_enabled?.[id]??a.google.enabled,authorized=["verified","authenticated",...(id==="aist"?["synced"]:[])].includes(a.google.grants?.[id]);const toggle=button((enabled?"停用 ":"启用 ")+label,async()=>{await api("/api/backends/aist/accounts/"+a.google.id,{method:"PATCH",data:{backend:id,enabled:!enabled}});expanded.delete(a.id);panels.delete(a.id);await refresh();});if(!authorized&& !enabled){toggle.disabled=true;toggle.title="请先完成此后端的凭据同步或授权";}}
+      for(const [id,label]of [["aist","AIST"],["robin","Robin"]]){const enabled=a.google.backend_enabled?.[id]??a.google.enabled,authorized=["verified","authenticated",...(id==="aist"?["synced"]:[])].includes(a.google.grants?.[id]);const toggle=button(enabled?"停用":"启用",async()=>{await api("/api/backends/aist/accounts/"+a.google.id,{method:"PATCH",data:{backend:id,enabled:!enabled}});expanded.delete(a.id);panels.delete(a.id);await refresh();},{backend:id,kind:"toggle"});if(!authorized&& !enabled){toggle.disabled=true;toggle.title="请先完成此后端的凭据同步或授权";}}
       for(const [backend,label]of [["aist","AIST"],["robin","Robin"]])button("删除 "+label+" 授权",async()=>{
         const cell=feedbackRow(a.id,"删除 "+label+" 授权");cell.append(text("p","仅删除此账号的 "+label+" 登录资料、模型缓存和错误状态；其他后端、账号记录及历史用量保留。再次使用需重新登录。","muted"));
         const confirm=text("button","确认删除 "+label+" 授权","secondary danger");confirm.onclick=async()=>{confirm.disabled=true;try{await api("/api/backends/"+backend+"/accounts/"+a.google.id+"/authorization",{method:"DELETE"});expanded.delete(a.id);panels.delete(a.id);await refresh();feedbackRow(a.id,label+" 授权已删除");}catch(e){cell.append(text("p",e.message,"status-error"));confirm.disabled=false;}};cell.append(confirm);
-      },true);
+      },{backend,danger:true});
       if(!a.native)button("登录 agy",async()=>{
         const cell=feedbackRow(a.id,"关联账号并登录官方 agy");cell.append(text("p","AIST / Robin Cookie 不能代替 agy 登录。请明确选择已有 agy 账号或新建，再完成官方 CLI 授权。","muted"));const choose=document.createElement("select");choose.setAttribute("aria-label","选择 agy 账号");choose.add(new Option("请选择已有账号或新建",""));choose.add(new Option("新建 agy 账号","new"));for(const native of state.accounts)choose.add(new Option(native.name+" · "+(native.status==="ready"?"已登录":"待登录"),native.id));const save=text("button","关联并登录 agy");save.disabled=true;choose.onchange=()=>save.disabled=!choose.value;save.onclick=async()=>{save.disabled=true;try{const r=await api("/api/backends/aist/accounts/"+a.google.id+"/agy",{method:"POST",data:choose.value==="new"?{create:true}:{native_account_id:choose.value}});await refresh();const native=state.accounts.find(n=>n.id===r.account_id);if(!native)throw Error("关联的 agy 账号已不存在，请重新选择");if(native.status==="ready"){feedbackRow(native.id,"agy 账号已登录").append(text("p","已关联选定的 agy 账号，可以直接使用；需要更换登录时点击登录 agy。","muted"));}else await showLogin(native);}catch(e){const target=directory().find(n=>n.google?.id===a.google.id)?.id||a.id;feedbackRow(target,"agy 登录未开始").append(text("p",e.message,"status-error"));}};cell.append(choose,save);
-      });
-      button("删除 Google 账号记录",async()=>{const cell=feedbackRow(a.id,"删除 Google 账号记录");cell.append(text("p","只移除本项目账号记录，已保存的登录资料与关联 agy 账号保留；不会删除 Google 官方账号。","muted"));const confirm=text("button","确认删除 Google 记录","secondary danger");confirm.onclick=async()=>{confirm.disabled=true;try{await api("/api/backends/aist/accounts/"+a.google.id,{method:"DELETE"});expanded.delete(a.id);await refresh();}catch(e){cell.append(text("p",e.message,"status-error"));confirm.disabled=false;}};cell.append(confirm);},true);
+      },{backend:"agy",kind:"login"});
+      button("删除 Google 账号记录",async()=>{const cell=feedbackRow(a.id,"删除 Google 账号记录");cell.append(text("p","只移除本项目账号记录，已保存的登录资料与关联 agy 账号保留；不会删除 Google 官方账号。","muted"));const confirm=text("button","确认删除 Google 记录","secondary danger");confirm.onclick=async()=>{confirm.disabled=true;try{await api("/api/backends/aist/accounts/"+a.google.id,{method:"DELETE"});expanded.delete(a.id);await refresh();}catch(e){cell.append(text("p",e.message,"status-error"));confirm.disabled=false;}};cell.append(confirm);},{danger:true});
     }
     if(a.native){
-    button("登录 agy",()=>showLogin(a));
-    button("刷新额度",()=>refreshQuota(a.id,true));
+    button("登录 / 更新凭据",()=>showLogin(a),{backend:"agy",kind:"login"});
+    button("刷新额度",()=>refreshQuota(a.id,true),{backend:"agy",kind:"quota"});
     button("校验并测试", async () => {
       feedbackRow(a.id, "正在校验并实际测试（消耗额度）…");
       await api("/api/accounts/" + a.id + "/verify", {
@@ -150,21 +131,21 @@ function renderAccounts() {
       });
       await refresh();
       feedbackRow(a.id, "模型目录与实际调用均验证通过，可以启用账号。");
-    });
-    button(a.enabled ? "停用 agy" : "启用 agy", async () => {
+    },{backend:"agy",kind:"verify"});
+    button(a.enabled ? "停用" : "启用", async () => {
       await api("/api/accounts/" + a.id, {
         method: "PATCH",
         data: { enabled: !a.enabled },
       });
       expanded.delete(a.id);panels.delete(a.id);
       await refresh();
-    });
+    },{backend:"agy",kind:"toggle"});
     button("删除 agy 授权",async()=>{
       const cell=feedbackRow(a.id,"删除 agy 授权");cell.append(text("p","删除此账号的 agy 登录目录、数据库授权快照、模型和额度缓存；AIST / Robin 授权、账号记录与历史用量保留。再次使用需重新登录。","muted"));
       const confirm=text("button","确认删除 agy 授权","secondary danger");confirm.onclick=async()=>{confirm.disabled=true;try{await api("/api/accounts/"+a.id+"/authorization",{method:"DELETE"});expanded.delete(a.id);panels.delete(a.id);await refresh();feedbackRow(a.id,"agy 授权已删除");}catch(e){cell.append(text("p",e.message,"status-error"));confirm.disabled=false;}};cell.append(confirm);
-    },true);
+    },{backend:"agy",danger:true});
     button(
-      "移除",
+      "移除 agy 记录",
       async () => {
         const cell = feedbackRow(a.id, "移除账号记录（登录目录仍保留）");
         const confirm = text("button", "确认移除", "secondary danger");
@@ -179,12 +160,13 @@ function renderAccounts() {
         };
         cell.append(confirm);
       },
-      true,
+      {danger:true},
     );
     }
-    if(more.childElementCount>1)bar.append(more);
+    const {bar,manage}=actions.row();manage.id='account-action-'+a.id;manage.setAttribute('aria-expanded',String(expanded.get(a.id)==='后端管理'));
     ops.append(bar);
     row.append(ops);
+    const labels=['','账号','后端状态','agy · 5 小时剩余','agy · 周额度剩余','请求 / 成功 / 失败','报告 Token',''];Array.from(row.children).forEach((cell,i)=>cell.dataset.label=labels[i]);
     rows.append(row);
     renderQuota(a);
     if (expanded.has(a.id)) {
@@ -193,6 +175,9 @@ function renderAccounts() {
       detail.className = "nearby";
       const cell = document.createElement("td");
       cell.colSpan = 8;
+      if(expanded.get(a.id)==='后端管理'){
+        const manager=actions.panel(statuses,()=>{expanded.delete(a.id);panels.delete(a.id);renderAccounts();document.getElementById('account-action-'+a.id)?.focus();});manager.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();expanded.delete(a.id);renderAccounts();document.getElementById('account-action-'+a.id)?.focus();}});detail.append(manager);rows.append(detail);continue;
+      }
       if (panels.has(a.id)) {
         detail.append(panels.get(a.id));
         rows.append(detail);
@@ -211,6 +196,7 @@ function renderAccounts() {
         "empty",
       );
     cell.colSpan = 8;
+    row.classList.add("account-empty-row");
     row.append(cell);
     rows.append(row);
   }
@@ -412,7 +398,7 @@ async function showLogin(a,resume=false){
   $("cancelLegacyAdd").onclick=()=>{$("addAccountPanel").hidden=true;};
   $("addForm").onsubmit=async event=>{event.preventDefault();try{
     const a=await api("/api/accounts",{method:"POST",data:{name:$("accountName").value}});
-    $("accountName").value="";$("addAccountPanel").hidden=true;await refresh();note("bulkFeedback","已添加 "+a.name+"，点击该行“登录 agy”开始授权。");
+    $("accountName").value="";$("addAccountPanel").hidden=true;await refresh();note("bulkFeedback","已添加 "+a.name+"，点击该行“管理后端”，在 agy 中开始登录。");
   }catch(error){note("accountsFeedback",error.message,true);}};
   $("accountSearch").oninput=renderAccounts;$("accountStatus").onchange=renderAccounts;
   const status=ctx.params.get("status");if(status==="ready")$("accountStatus").value="enabled";else if(status==="needs_login")$("accountStatus").value=status;
