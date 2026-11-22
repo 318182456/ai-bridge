@@ -11,3 +11,5 @@
 - 界面遵循DESIGN.md和全局design-md-reference；修改后用Playwright MCP检查真实操作、保存与重载。
 
 - DATABASE_URL 启用时 PG 为持久化源，原 JSON 只用于显式迁移；不要在数据库异常时回退创建空账号。已有授权快照仅在已验证成功后更新，恢复前校验摘要与归档路径。
+
+- 正常服务未配置 DATABASE_URL 时默认 SQLite（DATA_DIR/ai-bridge.sqlite），已有 PG 的 NAS 保持 PG；STORAGE_BACKEND 可显式选择。旧 JSON 必须显式迁移，不静默新建空账号。SQLite 使用内置 node:sqlite（Node >=22.13），无需本机编译。PG 连接池瞬断在同一进程恢复，不再使用专用单实例锁或丢连接就退出；按用户确认的通常单服务场景设计，不宣称多实例并发统计合并已实现。

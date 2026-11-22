@@ -14,19 +14,24 @@ CREATE TABLE IF NOT EXISTS ai_bridge.auth_profiles(kind text NOT NULL,id text NO
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==="object"?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 const hash=value=>createHash("sha256").update(Buffer.isBuffer(value)||typeof value==="string"?value:JSON.stringify(canonical(value))).digest("hex");
 export class Postgres extends EventEmitter {
- constructor(url,{pool}={}){super();this.pool=pool||new pg.Pool({connectionString:url,max:4,connectionTimeoutMillis:5000,idleTimeoutMillis:30000,statement_timeout:15000});this.pool.on?.("error",()=>{});this.pending=Promise.resolve();this.saved=null;this.closed=false;this.clients=new Set();}
- async open({writer=true}={}){try{this.lease=await this.pool.connect();this.lease.on("error",()=>this.fail());this.lease.once("end",()=>this.fail());if(writer){const r=await this.lease.query("SELECT pg_try_advisory_lock(193382,1) AS locked");if(!r.rows[0].locked)throw new AppError(409,"该数据库已有运行中的 AI Bridge，请先停止旧实例","storage_already_open");}await this.lease.query(ddl);this.assertReady();return this;}catch(e){await this.close();if(e instanceof AppError)throw e;throw unavailable();}}
- // ASVS 15.4.3/16.5.3: losing the singleton lease is terminal for this in-memory state.
- // Never clear failed or reconnect in place; the supervisor restarts and reloads PG under a fresh lock.
- fail(){if(this.closed||this.failed)return;this.failed=true;for(const entry of [...this.clients]){try{this.release(entry,true);}catch{}}this.emit("failure");}
- assertReady(){if(this.failed||this.closed)throw unavailable();}
+ constructor(url,{pool}={}){
+  super();this.mode="postgresql";this.pool=pool||new pg.Pool({connectionString:url,max:4,connectionTimeoutMillis:5000,idleTimeoutMillis:30000,statement_timeout:15000,keepAlive:true,keepAliveInitialDelayMillis:10000});
+  this.pool.on?.('error',()=>this.setAvailable(false));this.pending=Promise.resolve();this.saved=null;this.closed=false;this.available=false;this.clients=new Set();
+ }
+ // No dedicated session or global singleton lock: pg.Pool replaces broken connections in this process.
+ // ASVS 16.5.3: preserve memory/PG data, fail database-dependent requests while offline, never replay writes.
+ async open(){try{await this.query(ddl);return this;}catch(error){await this.close();throw error;}}
+ setAvailable(value){if(this.closed||this.available===value)return;this.available=value;this.emit(value?'reconnected':'disconnected');}
+ assertOpen(){if(this.closed)throw unavailable();}
+ assertReady(){this.assertOpen();if(!this.available)throw unavailable();}
+ async health(){await this.query('SELECT 1');}
  async connect(){
-  this.assertReady();const client=await this.pool.connect().catch(()=>{throw unavailable();});
-  if(this.failed||this.closed){client.release(true);throw unavailable();}
-  const entry={client,released:false,broken:false};entry.onError=()=>{entry.broken=true;};client.on('error',entry.onError);this.clients.add(entry);return entry;
+  this.assertOpen();let client;try{client=await this.pool.connect();}catch{this.setAvailable(false);throw unavailable();}
+  if(this.closed){client.release(true);throw unavailable();}
+  const entry={client,released:false,broken:false};entry.onError=()=>{entry.broken=true;this.setAvailable(false);};client.on('error',entry.onError);this.clients.add(entry);return entry;
  }
  release(entry,destroy=false){if(entry.released)return;entry.released=true;this.clients.delete(entry);entry.client.removeListener('error',entry.onError);entry.client.release(destroy||entry.broken);}
- async query(sql,values){const entry=await this.connect();try{const result=await entry.client.query(sql,values);this.assertReady();return result;}catch{throw unavailable();}finally{this.release(entry);}}
+ async query(sql,values){const entry=await this.connect();try{const result=await entry.client.query(sql,values);this.assertOpen();this.setAvailable(true);return result;}catch(error){if(connectionFailure(error))this.setAvailable(false);throw unavailable();}finally{this.release(entry);}}
  async document(name){return(await this.query("SELECT value FROM ai_bridge.documents WHERE name=$1",[name])).rows[0]?.value??null;}
  async putDocument(name,value){await this.query("INSERT INTO ai_bridge.documents(name,value) VALUES($1,$2::jsonb) ON CONFLICT(name) DO UPDATE SET value=EXCLUDED.value,updated_at=now()",[name,JSON.stringify(value)]);}
  async loadState(){
@@ -37,7 +42,7 @@ export class Postgres extends EventEmitter {
  fingerprints(state){const {accounts,keys,events,...config}=state;return{config:hash(config),accounts:new Map(accounts.map(a=>[a.id,hash(a)])),api_keys:new Map(keys.map(k=>[k.id,hash(k)])),request_events:new Map(events.map(e=>[hash(e),hash(e)]))};}
  saveState(state){const snapshot=structuredClone(state);const work=this.pending.catch(()=>{}).then(()=>this.saveSnapshot(snapshot));this.pending=work;return work;}
  async saveSnapshot(state){
-  this.assertReady();  const next=this.fingerprints(state),previous=this.saved||{accounts:new Map(),api_keys:new Map(),request_events:new Map()};const entry=await this.connect(),client=entry.client;
+  this.assertOpen();  const next=this.fingerprints(state),previous=this.saved||{accounts:new Map(),api_keys:new Map(),request_events:new Map()};const entry=await this.connect(),client=entry.client;
   try{
    await client.query("BEGIN");const {accounts,keys,events,...config}=state;
    if(next.config!==previous.config)await client.query("INSERT INTO ai_bridge.documents(name,value) VALUES('state',$1::jsonb) ON CONFLICT(name) DO UPDATE SET value=EXCLUDED.value,updated_at=now()",[JSON.stringify(config)]);
@@ -50,11 +55,13 @@ export class Postgres extends EventEmitter {
     }
     const removed=[...old.keys()].filter(id=>!next[table].has(id));if(removed.length)await client.query("DELETE FROM ai_bridge."+table+" WHERE id=ANY($1::text[])",[removed]);
    }
-   this.assertReady();await client.query("COMMIT");this.assertReady();this.saved=next;
-  }catch(e){await client.query("ROLLBACK").catch(()=>{});throw unavailable();}finally{this.release(entry);}
+   this.assertOpen();await client.query("COMMIT");this.assertOpen();this.setAvailable(true);this.saved=next;
+  }catch(e){if(connectionFailure(e))this.setAvailable(false);await client.query("ROLLBACK").catch(()=>{});throw unavailable();}finally{this.release(entry);}
  }
  async profile(kind,id){return(await this.query("SELECT archive,checksum,metadata,revision FROM ai_bridge.auth_profiles WHERE kind=$1 AND id=$2",[kind,id])).rows[0]||null;}
  async putProfile(kind,id,archive,metadata){const checksum=hash(archive);await this.query("INSERT INTO ai_bridge.auth_profiles(kind,id,checksum,archive,metadata) VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(kind,id) DO UPDATE SET checksum=EXCLUDED.checksum,archive=EXCLUDED.archive,metadata=EXCLUDED.metadata,revision=ai_bridge.auth_profiles.revision+1,updated_at=now() WHERE ai_bridge.auth_profiles.checksum<>EXCLUDED.checksum",[kind,id,checksum,archive,JSON.stringify(metadata)]);return checksum;}
  async deleteProfile(kind,id){await this.query("DELETE FROM ai_bridge.auth_profiles WHERE kind=$1 AND id=$2",[kind,id]);}
- async close(){if(this.closed)return;await this.pending.catch(()=>{});this.closed=true;if(this.lease){await this.lease.query("SELECT pg_advisory_unlock(193382,1)").catch(()=>{});this.lease.release(!!this.failed);this.lease=null;}await this.pool.end().catch(()=>{});}
+ async close(){if(this.closed)return;await this.pending.catch(()=>{});this.closed=true;this.available=false;await this.pool.end().catch(()=>{});}
 }
+
+function connectionFailure(error){return /^(08|57P0|ECONN|EPIPE|ETIMEDOUT|ENOTFOUND)/.test(String(error?.code||''))||/connection (?:terminated|error)|not queryable|client was closed/i.test(String(error?.message||''));}

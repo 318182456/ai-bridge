@@ -27,27 +27,30 @@ test('account directory merges explicit links once but never merges matching dis
  const rows=accountDirectory(native,google);assert.equal(rows.length,3);assert.equal(rows.filter(a=>a.native?.id==='a_1').length,1);assert.equal(rows[0].requests,5);assert.equal(rows[0].total_tokens,18);assert.equal(rows.at(-1).id,'a_2');assert.equal(rows[1].model_count,1);assert.equal(rows[1].name,'Robin display');
 });
 
-test('PostgreSQL persists normalized state and snapshots across restart, guards singleton ownership and rollback',{skip:!process.env.PG_TEST_URL},async()=>{
+test('PostgreSQL persists normalized state and snapshots across restart, recovers live connections and preserves rollback',{skip:!process.env.PG_TEST_URL},async()=>{
  const url=process.env.PG_TEST_URL,root=await mkdtemp(join(tmpdir(),'ai-bridge-pg-test-'));let db=await new Postgres(url).open();
  try{
   const store=await new Store(root,db).init();const a=await store.create({name:'synthetic-pg-account'});await store.createKeys([{name:'synthetic-key',value:'synthetic-private-api-key-123456789'}]);
   await store.event({id:'event-one',status:400,code:'synthetic_error'});await db.putDocument('google-grant/g_test',{synthetic_refresh:'synthetic-value'});
-  await assert.rejects(new Postgres(url).open(),{code:'storage_already_open'});const failed={...structuredClone(store.state),accounts:[...store.state.accounts,{name:'invalid-no-id'}]};await assert.rejects(db.saveState(failed),{code:'storage_unavailable'});
+  const second=await new Postgres(url).open();await second.close();const failed={...structuredClone(store.state),accounts:[...store.state.accounts,{name:'invalid-no-id'}]};await assert.rejects(db.saveState(failed),{code:'storage_unavailable'});
   await db.close();db=await new Postgres(url).open();const reopened=await new Store(root,db).init();assert.equal(reopened.state.accounts.length,1);assert.equal(reopened.state.accounts[0].id,a.id);assert.equal(reopened.state.keys.length,1);assert.equal(reopened.state.events.length,1);assert.equal((await db.document('google-grant/g_test')).synthetic_refresh,'synthetic-value');
   const vault=new AuthVault(db,root),home=vault.path('agy',a.id);await mkdir(home,{recursive:true});await writeFile(join(home,'settings.json'),'synthetic-profile');vault.mark('agy',a.id);assert.equal(await vault.capture('agy',a.id,{strict:true}),true);await vault.close();
   await db.close();db=await new Postgres(url).open();await db.loadState();await rm(home,{recursive:true});const restored=new AuthVault(db,root);assert.equal(await restored.restore('agy',a.id),true);assert.equal(await readFile(join(home,'settings.json'),'utf8'),'synthetic-profile');await restored.forget('agy',a.id);assert.equal(await db.profile('agy',a.id),null);assert.equal(await restored.restore('agy',a.id),false);await restored.close();
   // Use the current storage after restart for the deletion check.
   reopened.storage=db;
   reopened.state.events=[];await reopened.save();assert.equal((await db.query('SELECT count(*)::int AS count FROM ai_bridge.request_events')).rows[0].count,0);
-  // Terminate only this test service's dedicated lease, never a production session or the PG server.
+  // Terminate only an idle connection owned by this isolated test service. The app PID must stay alive.
   await db.close();const control=new pg.Pool({connectionString:url,max:1});let child;
-  const start=async()=>{const p=fork(new URL('./fixtures/storage-process.mjs',import.meta.url),[],{env:{...process.env,DATABASE_URL:url,DATA_DIR:join(root,'supervised'),ADMIN_PASSWORD:'synthetic-recovery-password-12345',API_KEY:'synthetic-recovery-api-key-12345'},stdio:['ignore','ignore','ignore','ipc']});child=p;const ready=await Promise.race([once(p,'message').then(([v])=>v),once(p,'exit').then(()=>{throw Error('recovery child exited before ready');}),new Promise((_r,reject)=>{const timer=setTimeout(()=>reject(Error('recovery child startup timed out')),15000);timer.unref();})]);return ready;};
+  const start=async()=>{const p=fork(new URL('./fixtures/storage-process.mjs',import.meta.url),[],{env:{...process.env,DATABASE_URL:url,STORAGE_BACKEND:'postgresql',DATA_DIR:join(root,'supervised'),ADMIN_PASSWORD:'synthetic-recovery-password-12345',API_KEY:'synthetic-recovery-api-key-12345'},stdio:['ignore','ignore','ignore','ipc']});child=p;return await Promise.race([once(p,'message').then(([v])=>v),once(p,'exit').then(()=>{throw Error('recovery child exited before ready');}),new Promise((_r,reject)=>{const timer=setTimeout(()=>reject(Error('recovery child startup timed out')),15000);timer.unref();})]);};
   try{
-   const before=await start();assert.equal(before.accounts,1);await assert.rejects(new Postgres(url).open(),{code:'storage_already_open'});
-   const exited=once(child,'exit');await control.query('SELECT pg_terminate_backend($1)',[before.pid]);const [code]=await Promise.race([exited,new Promise((_r,reject)=>{const timer=setTimeout(()=>reject(Error('recovery child failed to exit')),15000);timer.unref();})]);assert.equal(code,1);
-   const after=await start();assert.equal(after.accounts,1);assert.notEqual(after.pid,before.pid);assert.equal((await fetch('http://127.0.0.1:'+after.port+'/health')).status,200);await assert.rejects(new Postgres(url).open(),{code:'storage_already_open'});
+   const before=await start();assert.equal(before.accounts,1);assert.equal(child.pid,before.process);
+   const base='http://127.0.0.1:'+before.port;const login=await fetch(base+'/auth/login',{method:'POST',headers:{origin:base,'content-type':'application/json'},body:JSON.stringify({password:'synthetic-recovery-password-12345'})});const cookie=login.headers.get('set-cookie').split(';')[0];assert.equal(login.status,200);
+   await control.query('SELECT pg_terminate_backend($1)',[before.pid]);
+   let status=0;const until=Date.now()+5000;while(Date.now()<until){status=(await fetch(base+'/health')).status;if(status===200)break;await new Promise(r=>setTimeout(r,50));}assert.equal(status,200);assert.equal(child.exitCode,null);assert.equal(child.pid,before.process);
+   const accounts=await(await fetch(base+'/api/accounts',{headers:{cookie}})).json();assert.equal(accounts.accounts.length,1);assert.equal(accounts.accounts[0].id,a.id);assert.equal(accounts.accounts[0].name,'synthetic-pg-account');
+   const other=await new Postgres(url).open();await other.close();assert.equal((await control.query('SELECT pg_backend_pid() AS pid')).rows.length,1);
    const ended=once(child,'exit');child.kill('SIGTERM');assert.equal((await ended)[0],0);child=null;
-  }finally{if(child&&child.exitCode===null){child.kill('SIGKILL');await once(child,'exit').catch(()=>{});}await control.end();}
+  }finally{if(child&&child.exitCode===null&&child.signalCode===null){child.kill('SIGKILL');await once(child,'exit').catch(()=>{});}await control.end();}
   db=await new Postgres(url).open();const fresh=await new Store(root,db).init();assert.equal(fresh.state.accounts[0].id,a.id);assert.equal(fresh.state.keys.length,1);assert.equal((await db.document('google-grant/g_test')).synthetic_refresh,'synthetic-value');
 
  }finally{await db.close();await rm(root,{recursive:true,force:true});}

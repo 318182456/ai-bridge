@@ -15,7 +15,7 @@ export class Store {
     await mkdir(this.dir, { recursive: true, mode: 0o700 });
     try {
       const loaded = this.storage?await this.storage.loadState():JSON.parse(await readFile(this.path,"utf8"));
-      if(!loaded&&this.storage){try{await readFile(this.path);throw new AppError(409,"检测到本地数据，请先执行 PostgreSQL 迁移","storage_migration_required");}catch(e){if(e.code!=="ENOENT")throw e;}}
+      if(!loaded&&this.storage)for(const legacy of [this.path,join(this.dir,"google","accounts.json")]){try{await readFile(legacy);throw new AppError(409,"检测到本地 JSON 数据，请先执行数据库迁移","storage_migration_required");}catch(e){if(e.code!=="ENOENT")throw e;}}
       this.state = {...this.state,...loaded,backend_usage:{...this.state.backend_usage,...loaded?.backend_usage},settings:{...defaultSettings,...loaded?.settings}};
     } catch (e) {
       if (e.code !== "ENOENT") throw e;

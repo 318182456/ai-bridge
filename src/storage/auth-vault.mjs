@@ -14,7 +14,7 @@ export class AuthVault {
  serial(key,action){const work=(this.chains.get(key)||Promise.resolve()).catch(()=>{}).then(action);this.chains.set(key,work);return work.finally(()=>{if(this.chains.get(key)===work)this.chains.delete(key);});}
  mark(kind,id){this.path(kind,id);this.validated.add(kind+":"+id);}
  unmark(kind,id){this.path(kind,id);return this.validated.delete(kind+":"+id);}
- status(){return{mode:"postgresql",pending_profiles:this.chains.size,unsynced_profiles:this.failures.size};}
+ status(){return{mode:this.storage.mode||"postgresql",pending_profiles:this.chains.size,unsynced_profiles:this.failures.size};}
  async validate(archive){
   if(!Buffer.isBuffer(archive)||archive.length>64*1024*1024)throw new AppError(503,"授权快照过大或格式无效","auth_snapshot_invalid");
   let entries=0,total=0;const paths=[];

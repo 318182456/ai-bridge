@@ -9,4 +9,5 @@ if(manifest.format!==1||!["linux-amd64","linux-arm64"].includes(manifest.platfor
 for(const id of ["agy","robin","aist"])if(manifest.backends?.[id]?.implemented!==true)fail();
 for(const file of ["bin/node","bin/agy"])await access(resolve(root,file),constants.X_OK);
 for(const file of ["src/backends/robin.mjs","src/backends/browser-engine.mjs","node_modules/playwright-core/cli.js"])await access(resolve(root,file));
-console.log("AI Bridge release layout verified");
+const {DatabaseSync}=await import("node:sqlite");const sqlite=new DatabaseSync(":memory:");sqlite.prepare("SELECT 1").get();sqlite.close();
+console.log("AI Bridge release layout and SQLite runtime verified");

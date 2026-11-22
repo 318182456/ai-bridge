@@ -56,7 +56,7 @@ install -d -m 0750 -o root -g ai-bridge /etc/ai-bridge
 install -d -m 0700 -o ai-bridge -g ai-bridge /var/lib/ai-bridge
 # Preserve the administrator's existing configuration and data during every upgrade.
 if [ ! -f /etc/ai-bridge/ai-bridge.env ]; then
-  { printf 'ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)"; printf 'API_KEY=%s\n' "$(openssl rand -hex 32)"; printf '%s\n' 'HOST=127.0.0.1' 'PORT=18861' 'MAX_CONCURRENCY=1' 'QUEUE_LIMIT=32' 'SESSION_LIMIT=1' 'SESSION_IDLE_SECONDS=120' 'TASK_TIMEOUT_SECONDS=180'; } > /etc/ai-bridge/ai-bridge.env
+  { printf 'ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)"; printf 'API_KEY=%s\n' "$(openssl rand -hex 32)"; printf '%s\n' 'HOST=127.0.0.1' 'PORT=18861' 'STORAGE_BACKEND=sqlite' 'MAX_CONCURRENCY=1' 'QUEUE_LIMIT=32' 'SESSION_LIMIT=1' 'SESSION_IDLE_SECONDS=120' 'TASK_TIMEOUT_SECONDS=180'; } > /etc/ai-bridge/ai-bridge.env
   chown root:ai-bridge /etc/ai-bridge/ai-bridge.env
   chmod 0640 /etc/ai-bridge/ai-bridge.env
 fi

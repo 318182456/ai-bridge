@@ -6,6 +6,7 @@ import {syncBrowserCredential} from './backends/browser-credential-sync.mjs';
 import {BrowserSync,registerBrowserSync} from "./admin/browser-sync.mjs";
 import {browserSyncScript} from "./admin/browser-sync-script.mjs";
 import {Postgres} from "./storage/postgres.mjs";
+import {SQLite} from "./storage/sqlite.mjs";
 import {AuthVault} from "./storage/auth-vault.mjs";
 import {BrowserEngine} from "./backends/browser-engine.mjs";
 import {verifyGoogleAccount} from "./backends/account-verification.mjs";
@@ -78,10 +79,16 @@ function promptInput(input) {
 }
 export async function createApplication(options = {}) {
   const dataDir = resolve(options.dataDir || process.env.DATA_DIR || "data");
-  const storage=options.storage||(process.env.DATABASE_URL?await new Postgres(process.env.DATABASE_URL).open():null);
-  if(storage&&await storage.document("migration-staging")&&!await storage.document("migration-complete")){await storage.close();throw new AppError(409,"PostgreSQL 迁移未完成，请先完成迁移","storage_migration_required");}
+  // The embeddable factory retains explicit file-mode compatibility; the actual service defaults to SQLite.
+  const storageMode=options.storageMode||process.env.STORAGE_BACKEND||(process.env.DATABASE_URL?'postgresql':'file');
+  if(!['file','sqlite','postgresql'].includes(storageMode))throw new AppError(400,'STORAGE_BACKEND 必须为 sqlite、postgresql 或 file');
+  if(!options.storage&&storageMode==='postgresql'&&!process.env.DATABASE_URL)throw new AppError(400,'PostgreSQL 模式需要 DATABASE_URL');
+  const storage=options.storage||(storageMode==='sqlite'?await new SQLite(join(dataDir,'ai-bridge.sqlite')).open():storageMode==='postgresql'?await new Postgres(process.env.DATABASE_URL).open():null);
+  if(storage&&await storage.document("migration-staging")&&!await storage.document("migration-complete")){await storage.close();throw new AppError(409,"数据库迁移未完成，请先完成迁移","storage_migration_required");}
   const store = options.store || (await new Store(dataDir,storage).init().catch(async error=>{await storage?.close();throw error;}));
   const logger=options.logger||new Logger({level:process.env.LOG_LEVEL||store.state.settings.log_level});
+  storage?.on?.('disconnected',()=>logger.warn('storage.disconnected',{code:'storage_unavailable',stage:'storage',message:'数据库连接中断，等待连接池自动重连；不清空账号或重放写入。'}));
+  storage?.on?.('reconnected',()=>logger.info('storage.reconnected',{stage:'storage',message:'数据库连接已恢复，继续使用当前服务进程。'}));
   const authVault=storage?new AuthVault(storage,dataDir,logger):null;
   const runner =
     options.runner ||
@@ -190,9 +197,9 @@ export async function createApplication(options = {}) {
       }
     },signal,{sharedKey:selected,key:existing?"session:"+existing.id:null,id,cancelable:true,metadata:{account_id:selected,kind:"generation",account_name:context.account_name,model:model||"默认模型",source:context.key_id?"api":"panel",api_key_name:context.key_name||"管理台",summary:params.messages?.findLast(m=>m.role==="user")?.content||params.prompt,content:params.messages?JSON.stringify(params.messages,null,2):params.prompt}});
   }
-  register("GET", "/health", "public", async ({ res }) =>
-    send(res, { status: "ok", version }),
-  );
+  register("GET", "/health", "public", async ({ res }) => {
+    await storage?.health();send(res, { status: "ok", version });
+  });
   registerPages({register,publicDir});
   registerAdmin({register,send,body,store,auth,queue,runner,logger,dataDir,version,quotas,sessions,googleAccounts,backends,storage,authVault});
   registerSessions({register,send,sessions});
@@ -564,7 +571,7 @@ export async function createApplication(options = {}) {
         );
       }
       const principal = auth.check(req, found.route.access);
-      if(found.route.access!=="public"||url.pathname==="/health")storage?.assertReady();
+      if(found.route.access!=="public")storage?.assertReady();
       await found.route.handler({
         req,
         res,
@@ -621,7 +628,7 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 ) {
-  const app = await createApplication();
+  const app = await createApplication({storageMode:process.env.STORAGE_BACKEND||(process.env.DATABASE_URL?"postgresql":"sqlite")});
   const port = Number(process.env.PORT || 18861);
   app.server.listen(port, process.env.HOST || "0.0.0.0", () =>
     app.logger.info("service.started",{version,port}),
