@@ -1,3 +1,4 @@
+import {manageProcess} from './runtime/lifecycle.mjs';
 import {registerBackendAuthorization} from './admin/backend-authorization.mjs';
 import {registerGoogleAccounts} from './admin/google-accounts.mjs';
 import {backendEnabled} from './backends/account-state.mjs';
@@ -625,15 +626,5 @@ if (
   app.server.listen(port, process.env.HOST || "0.0.0.0", () =>
     app.logger.info("service.started",{version,port}),
   );
-  const close = () => {
-    app.tasks.close();
-    app.browserSync.close();app.catalogRefresh.close();
-    app.loginManager.close();
-    app.server.close();
-    Promise.all([app.catalogRefresh.close(),app.browserSync.close(),app.store.pending, app.backends.close(), app.runner.close()]).then(()=>app.authVault?.close()).then(()=>app.storage?.close()).finally(() =>
-      process.exit(0),
-    );
-  };
-  process.on("SIGTERM", close);
-  process.on("SIGINT", close);
+  manageProcess(app);
 }

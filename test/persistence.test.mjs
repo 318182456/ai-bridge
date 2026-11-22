@@ -1,4 +1,7 @@
 import test from 'node:test';
+import {fork} from 'node:child_process';
+import {once} from 'node:events';
+import pg from 'pg';
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';import {join} from 'node:path';import {createHash} from 'node:crypto';
@@ -36,6 +39,17 @@ test('PostgreSQL persists normalized state and snapshots across restart, guards 
   // Use the current storage after restart for the deletion check.
   reopened.storage=db;
   reopened.state.events=[];await reopened.save();assert.equal((await db.query('SELECT count(*)::int AS count FROM ai_bridge.request_events')).rows[0].count,0);
+  // Terminate only this test service's dedicated lease, never a production session or the PG server.
+  await db.close();const control=new pg.Pool({connectionString:url,max:1});let child;
+  const start=async()=>{const p=fork(new URL('./fixtures/storage-process.mjs',import.meta.url),[],{env:{...process.env,DATABASE_URL:url,DATA_DIR:join(root,'supervised'),ADMIN_PASSWORD:'synthetic-recovery-password-12345',API_KEY:'synthetic-recovery-api-key-12345'},stdio:['ignore','ignore','ignore','ipc']});child=p;const ready=await Promise.race([once(p,'message').then(([v])=>v),once(p,'exit').then(()=>{throw Error('recovery child exited before ready');}),new Promise((_r,reject)=>{const timer=setTimeout(()=>reject(Error('recovery child startup timed out')),15000);timer.unref();})]);return ready;};
+  try{
+   const before=await start();assert.equal(before.accounts,1);await assert.rejects(new Postgres(url).open(),{code:'storage_already_open'});
+   const exited=once(child,'exit');await control.query('SELECT pg_terminate_backend($1)',[before.pid]);const [code]=await Promise.race([exited,new Promise((_r,reject)=>{const timer=setTimeout(()=>reject(Error('recovery child failed to exit')),15000);timer.unref();})]);assert.equal(code,1);
+   const after=await start();assert.equal(after.accounts,1);assert.notEqual(after.pid,before.pid);assert.equal((await fetch('http://127.0.0.1:'+after.port+'/health')).status,200);await assert.rejects(new Postgres(url).open(),{code:'storage_already_open'});
+   const ended=once(child,'exit');child.kill('SIGTERM');assert.equal((await ended)[0],0);child=null;
+  }finally{if(child&&child.exitCode===null){child.kill('SIGKILL');await once(child,'exit').catch(()=>{});}await control.end();}
+  db=await new Postgres(url).open();const fresh=await new Store(root,db).init();assert.equal(fresh.state.accounts[0].id,a.id);assert.equal(fresh.state.keys.length,1);assert.equal((await db.document('google-grant/g_test')).synthetic_refresh,'synthetic-value');
+
  }finally{await db.close();await rm(root,{recursive:true,force:true});}
 });
 

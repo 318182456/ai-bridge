@@ -2,6 +2,8 @@
 Description=AI Bridge
 Wants=network-online.target
 After=network-online.target
+# Retry after a prolonged database outage; RestartSec bounds the retry rate.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
