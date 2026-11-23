@@ -61,16 +61,21 @@ let structured;
 const schemaIndex = args.indexOf("--json-schema");
 if (schemaIndex >= 0) {
   const schema = JSON.parse(readFileSync(args[schemaIndex + 1], "utf8"));
-  const hasResult = message.includes('"role":"tool"');
-  const choices = schema.properties.tool_calls.items.properties.name.enum;
-  structured = {
-    content: hasResult || schema.properties.tool_calls.maxItems === 0 ? "5" : "",
-    tool_calls: hasResult || schema.properties.tool_calls.maxItems === 0 ? [] : [
-      {name: message.includes("TOOL_UNKNOWN") ? "undeclared" : choices[0],
-       arguments: JSON.stringify(message.includes("TOOL_BAD_ARGUMENTS") ? {a: "wrong", b: 3} : {a: 2, b: 3})},
-    ],
-  };
-  response = JSON.stringify(structured);
+  if (schema.properties?.tool_calls) {
+    const hasResult = message.includes('"role":"tool"');
+    const choices = schema.properties.tool_calls.items.properties.name.enum;
+    structured = {
+      content: hasResult || schema.properties.tool_calls.maxItems === 0 ? "5" : "",
+      tool_calls: hasResult || schema.properties.tool_calls.maxItems === 0 ? [] : [
+        {name: message.includes("TOOL_UNKNOWN") ? "undeclared" : choices[0],
+         arguments: JSON.stringify(message.includes("TOOL_BAD_ARGUMENTS") ? {a: "wrong", b: 3} : {a: 2, b: 3})},
+      ],
+    };
+    response = JSON.stringify(structured);
+  } else {
+    structured = { ok: true, result: "structured" };
+    response = JSON.stringify(structured);
+  }
 }
 console.log(
   JSON.stringify({

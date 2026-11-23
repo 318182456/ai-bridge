@@ -4,7 +4,7 @@
 
 ## 当前开发状态
 
-当前发布版 `0.4.0-alpha.25` 提供 Docker 镜像与 amd64/arm64 原生 Linux 安装包。AIST / Robin 仅通过本机浏览器和配套脚本同步凭据；NAS 远程 Google 登录、画面传输与桌面控制已移除。agy 保留官方 CLI 的独立登录和一次性授权码流程。各后端分别记录授权与启停状态，同步完成不代表生成权限已通过。
+当前发布版 `0.4.0-alpha.26` 提供 Docker 镜像与 amd64/arm64 原生 Linux 安装包。AIST / Robin 仅通过本机浏览器和配套脚本同步凭据；NAS 远程 Google 登录、画面传输与桌面控制已移除。agy 保留官方 CLI 的独立登录和一次性授权码流程。各后端分别记录授权与启停状态，同步完成不代表生成权限已通过。
 
 同一 Google 身份可以复用浏览器登录资料，但各产品权限并不等价。Google 仍可能拒绝账号、地区或浏览器；只有实际验证成功才显示对应后端已就绪，界面与模拟测试通过不代表 Google 接受真实登录。
 
@@ -53,7 +53,7 @@ docker compose up -d
 
 | 变量 | 默认/用途 |
 | --- | --- |
-| `IMAGE_TAG` | `0.4.0-alpha.25`，发布版本；按需升级 |
+| `IMAGE_TAG` | `0.4.0-alpha.26`，发布版本；按需升级 |
 | `ADMIN_PASSWORD` | 管理页登录密码，至少20字符 |
 | `API_KEY` | 客户端Bearer密钥，至少20字符，须与管理密码不同 |
 | `PORT` / `BIND_ADDRESS` | `18861` / `0.0.0.0`，宿主机访问入口 |
@@ -162,7 +162,7 @@ NAS迁移或复制数据后，目录和文件需归属容器用户UID/GID 1000:1
 
 - temperature、top_p、max_tokens、max_completion_tokens、seed、stop 可兼容接收，但官方CLI没有等价控制，不生效项会列在响应头 x-agy-ignored-parameters 和非流式响应 agy.ignored_parameters 中。不会据此声称严格截断输出或采用指定采样策略。
 - 工具名称和参数按客户端的JSON Schema校验，支持Draft7/2019-09/2020-12及本地引用；无效参数或未知工具返回明确错误，不把不完整结果当成成功。工具调用流为缓冲SSE，支持stream_options.include_usage。
-- n只支持1；response_format及旧functions/function_call尚不支持，返回明确错误。CLI原生工具审批仍保持严格；用户传入的客户端函数只生成调用请求，不由网关执行。
+- n只支持1；支持 response_format（text、json_object 及 json_schema 结构化输出）；旧 functions/function_call 废弃参数返回明确错误。CLI原生工具审批仍保持严格；用户传入的客户端函数只生成调用请求，不由网关执行。
 - 管理页“支持模型”汇总账号实际返回的模型目录，可搜索、筛选可调用模型及复制ID；未启用账号的模型仍会显示，但可用账号数为0。模型清单在登录自动校验后同步刷新。
 - 首次工作区确认仅自动信任本账号的login-workspace独立空目录，不信任保存登录状态的home或客户端指定目录。
 

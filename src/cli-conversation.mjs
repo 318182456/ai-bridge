@@ -85,7 +85,11 @@ export class CliConversation {
     const result = event.result;
     if (!result || result.status !== "SUCCESS") throw classifyFailure(String(result?.error || ""));
     if (result.finished_reason) throw new AppError(502, "agy 返回未完成的结果", "incomplete_result");
-    if (typeof result.response !== "string" || !result.response.trim())
+    let responseText = typeof result.response === "string" ? result.response : "";
+    if (!responseText.trim() && result.structured_output != null) {
+      responseText = typeof result.structured_output === "string" ? result.structured_output : JSON.stringify(result.structured_output);
+    }
+    if (!responseText.trim())
       throw new AppError(502, "agy 返回空内容", "empty_result");
     if (this.conversationId && result.conversation_id !== this.conversationId) throw invalid();
     this.conversationId = result.conversation_id;
@@ -103,7 +107,7 @@ export class CliConversation {
       }
     }
     this.previousUsage = current;
-    this.pending.result = {response: result.response, usage, conversation_id: result.conversation_id,
+    this.pending.result = {response: responseText, usage, conversation_id: result.conversation_id,
       structured_output: result.structured_output, model: this.model};
   }
 

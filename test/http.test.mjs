@@ -238,6 +238,17 @@ test("OpenAI text and buffered SSE return real CLI output; malformed tools and u
     const output = await stream.text();
     assert.match(output, /chat.completion.chunk/);
     assert.match(output, /\[DONE\]/);
+    const jsonRes = await call("/v1/chat/completions", {
+      method: "POST",
+      headers,
+      data: {
+        model: "gemini-test-medium",
+        messages: [{ role: "user", content: "hi" }],
+        response_format: { type: "json_object" },
+      },
+    });
+    assert.equal(jsonRes.status, 200);
+    assert.equal(typeof (await jsonRes.json()).choices[0].message.content, "string");
   }));
 
 test("admin task requests reject local-file expansion and oversized bodies", () =>

@@ -212,7 +212,11 @@ export class Runner {
             if (!result || result.status !== "SUCCESS")
               throw classifyFailure(String(result?.error || ""));
             if (result.finished_reason) throw new AppError(502, "agy 返回未完成的结果", "incomplete_result");
-            if (typeof result.response !== "string" || !result.response.trim())
+            let responseText = typeof result.response === "string" ? result.response : "";
+            if (!responseText.trim() && result.structured_output != null) {
+              responseText = typeof result.structured_output === "string" ? result.structured_output : JSON.stringify(result.structured_output);
+            }
+            if (!responseText.trim())
               throw new AppError(502, "agy 返回空内容", "empty_result");
             const usage = {};
             for (const key of [
@@ -227,7 +231,7 @@ export class Runner {
             }
             this.authVault?.mark("agy",id);
             resolve({
-              response: result.response,
+              response: responseText,
               ...(schema != null ? {structured_output: result.structured_output} : {}),
               usage,
               conversation_id: result.conversation_id,
